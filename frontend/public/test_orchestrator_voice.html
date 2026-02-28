@@ -22,14 +22,14 @@
   }
 
   /* Header */
-  .header { padding: 24px 24px 0; text-align: center; width: 100%; max-width: 900px; }
+  .header { padding: 24px 24px 0; text-align: center; width: 100%; max-width: 960px; }
   .header h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
   .header h1 span { color: var(--accent); }
   .header .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
 
   /* Phase indicator */
   .phase-bar {
-    display: flex; gap: 2px; margin: 16px auto 0; width: 100%; max-width: 900px; padding: 0 24px;
+    display: flex; gap: 2px; margin: 16px auto 0; width: 100%; max-width: 960px; padding: 0 24px;
   }
   .phase-step {
     flex: 1; padding: 8px 12px; font-size: 11px; font-weight: 600;
@@ -41,12 +41,12 @@
   .phase-step.done { background: #1a2e1a; color: var(--green); border-color: #2a3e2a; }
 
   /* Main layout */
-  .main { display: flex; gap: 16px; width: 100%; max-width: 900px; padding: 16px 24px; flex: 1; min-height: 0; }
+  .main { display: flex; gap: 16px; width: 100%; max-width: 960px; padding: 16px 24px; flex: 1; min-height: 0; }
 
   /* Chat panel */
   .chat-panel {
     flex: 1; display: flex; flex-direction: column; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 12px; overflow: hidden; min-height: 500px;
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden; min-height: 550px;
   }
   .chat-messages {
     flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px;
@@ -60,7 +60,12 @@
 
   .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
   .msg.agent { align-self: flex-start; background: var(--surface2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-  .msg.system-msg { align-self: center; background: transparent; color: var(--muted); font-size: 13px; text-align: center; }
+  .msg.system-msg { align-self: center; background: transparent; color: var(--muted); font-size: 13px; text-align: center; max-width: 100%; }
+  .msg.feedback-prompt {
+    align-self: center; background: var(--surface2); color: var(--orange);
+    font-size: 12px; text-align: center; max-width: 100%; border: 1px dashed var(--orange);
+    padding: 8px 16px; border-radius: 8px;
+  }
 
   .msg .agent-badge {
     display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
@@ -125,10 +130,12 @@
   .mic-btn:hover { border-color: var(--accent); background: #1a1a3e; }
   .mic-btn.recording { border-color: var(--red); background: #2a1a1a; animation: pulse 1.5s infinite; }
   .mic-btn.processing { border-color: var(--orange); background: #2a2a1a; cursor: wait; }
+  .mic-btn.awaiting { border-color: var(--orange); background: #2a2a1a; }
   .mic-btn svg { width: 24px; height: 24px; fill: var(--muted); }
   .mic-btn:hover svg { fill: var(--accent); }
   .mic-btn.recording svg { fill: var(--red); }
   .mic-btn.processing svg { fill: var(--orange); }
+  .mic-btn.awaiting svg { fill: var(--orange); }
   @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.4); } 50% { box-shadow: 0 0 0 14px rgba(248,113,113,0); } }
 
   .text-input {
@@ -138,6 +145,9 @@
   }
   .text-input:focus { border-color: var(--accent); }
   .text-input::placeholder { color: var(--muted); }
+  .text-input.awaiting { border-color: var(--orange); }
+  .text-input.awaiting::placeholder { color: var(--orange); }
+
   .send-btn {
     padding: 10px 16px; border-radius: 10px; border: none;
     background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
@@ -147,6 +157,7 @@
   .send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
   .voice-status { font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px; padding: 0 16px 8px; }
+  .voice-status.awaiting { color: var(--orange); font-weight: 600; }
 
   /* Side panel */
   .side-panel {
@@ -168,28 +179,6 @@
   }
   .panel-card .toggle-row label { font-size: 12px; color: var(--text); cursor: pointer; }
 
-  /* HITL panel */
-  .hitl-card {
-    border-color: var(--orange); display: none;
-  }
-  .hitl-card.active { display: block; }
-  .hitl-card h3 { color: var(--orange); }
-  .hitl-card textarea {
-    width: 100%; background: var(--surface2); border: 1px solid var(--border);
-    color: var(--text); padding: 6px 8px; border-radius: 4px; font-size: 12px;
-    resize: vertical; min-height: 40px; margin-bottom: 6px;
-  }
-  .hitl-card select { margin-bottom: 6px; width: 100%; }
-  .hitl-actions { display: flex; gap: 4px; flex-wrap: wrap; }
-  .hitl-actions button {
-    padding: 5px 10px; border-radius: 6px; border: none; font-size: 11px;
-    font-weight: 600; cursor: pointer; color: #fff;
-  }
-  .btn-approve { background: var(--green); }
-  .btn-revise { background: var(--blue); }
-  .btn-reroute { background: var(--purple); }
-  .btn-cancel { background: var(--red); }
-
   /* Quick test */
   .quick-row { display: flex; gap: 4px; flex-wrap: wrap; }
   .quick-row button {
@@ -203,6 +192,14 @@
   .stat-label { color: var(--muted); }
   .stat-val { font-weight: 600; }
 
+  /* HITL status indicator */
+  .hitl-status {
+    padding: 8px 12px; border-radius: 8px; font-size: 11px;
+    text-align: center; display: none;
+    background: #2a2a1a; border: 1px solid var(--orange); color: var(--orange);
+  }
+  .hitl-status.active { display: block; }
+
   /* Responsive */
   @media (max-width: 768px) {
     .main { flex-direction: column; }
@@ -215,7 +212,7 @@
 
 <div class="header">
   <h1><span>AI Tutor</span> Voice Orchestration</h1>
-  <div class="sub">Speak to learn. The manager routes you to the right agent.</div>
+  <div class="sub">Speak to learn. The manager routes you to the right agent. All responses go through HITL review.</div>
 </div>
 
 <div class="phase-bar">
@@ -253,7 +250,6 @@
       <div class="cfg-row"><label>Knowledge</label>
         <select id="knowledgeMode"><option value="internal_only" selected>Internal Only (FAISS)</option><option value="external_ok">External OK</option><option value="external_only">External Only (Web)</option></select>
       </div>
-      <div class="toggle-row"><input type="checkbox" id="hitlEnabled" /><label for="hitlEnabled">HITL Review</label></div>
       <div class="toggle-row"><input type="checkbox" id="voiceOutput" checked /><label for="voiceOutput">Voice Output</label></div>
     </div>
 
@@ -263,11 +259,24 @@
       <div class="quick-row">
         <button onclick="quickSend('I want to learn concepts today')">Learn</button>
         <button onclick="quickSend('Explain eigenvalues')">Professor</button>
-        <button onclick="quickSend('Give me practice problems')">TA Gen</button>
+        <button onclick="quickSend('I want to solve some problems')">Problems</button>
         <button onclick="quickSend('Check my work: x = 2')">TA Solve</button>
         <button onclick="quickSend('I want easier problems')">Easier</button>
         <button onclick="quickSend('Challenge me')">Harder</button>
       </div>
+      <div class="quick-row" style="margin-top:6px;">
+        <button onclick="quickSend('Looks good')">Approve</button>
+        <button onclick="quickSend('Explain differently')">Revise</button>
+        <button onclick="quickSend('Give me problems instead')">Reroute</button>
+      </div>
+    </div>
+
+    <!-- HITL Status -->
+    <div class="panel-card hitl-status" id="hitlStatus">
+      Awaiting your feedback. Speak or type:<br/>
+      <b>"Looks good"</b> to approve<br/>
+      <b>"Explain differently"</b> to revise<br/>
+      <b>"Give me problems instead"</b> to reroute
     </div>
 
     <!-- Stats -->
@@ -279,25 +288,7 @@
       <div class="stat-row"><span class="stat-label">Latency</span><span class="stat-val" id="statLatency">--</span></div>
       <div class="stat-row"><span class="stat-label">RAG</span><span class="stat-val" id="statRag">--</span></div>
       <div class="stat-row"><span class="stat-label">Turn</span><span class="stat-val" id="statTurn">0</span></div>
-    </div>
-
-    <!-- HITL -->
-    <div class="panel-card hitl-card" id="hitlCard">
-      <h3>HITL Review</h3>
-      <textarea id="feedbackText" placeholder="Feedback (optional)..."></textarea>
-      <select id="rerouteTo">
-        <option value="">Reroute to...</option>
-        <option value="professor">Professor</option>
-        <option value="ta_problem_gen">TA Problem Gen</option>
-        <option value="ta_problem_solve">TA Problem Solve</option>
-        <option value="rag">RAG</option>
-      </select>
-      <div class="hitl-actions">
-        <button class="btn-approve" onclick="sendFeedback('approve')">Approve</button>
-        <button class="btn-revise" onclick="sendFeedback('revise')">Revise</button>
-        <button class="btn-reroute" onclick="sendFeedback('reroute')">Reroute</button>
-        <button class="btn-cancel" onclick="sendFeedback('cancel')">Cancel</button>
-      </div>
+      <div class="stat-row"><span class="stat-label">HITL</span><span class="stat-val" id="statHitl" style="color:var(--green);">Always On</span></div>
     </div>
   </div>
 </div>
@@ -306,16 +297,16 @@
 // ========== State ==========
 const $ = id => document.getElementById(id);
 let mediaRecorder = null, audioChunks = [], isRecording = false, isProcessing = false;
-let lastThreadId = null, awaitingHitl = false;
+let awaitingFeedback = false;
 let currentPhase = 0;
 
 // Generate unique session ID on load
 $('sessionId').value = 'voice-' + Date.now().toString(36);
 
-// ========== Init: Manager greeting ==========
+// ========== Init ==========
 window.addEventListener('DOMContentLoaded', () => {
-  addSystemMsg("Hello! What would you like to do today? Say or type something like:");
-  addSystemMsg('"I want to learn lecture concepts" or "I want to solve some problems"');
+  addSystemMsg("Hello! What would you like to do today?");
+  addSystemMsg('Speak or type: "I want to learn lecture concepts" or "I want to solve some problems"');
 });
 
 // ========== Config ==========
@@ -326,7 +317,6 @@ function cfg() {
     sid: $('sessionId').value,
     level: $('level').value,
     knowledge: $('knowledgeMode').value,
-    hitl: $('hitlEnabled').checked,
     voiceOut: $('voiceOutput').checked,
   };
 }
@@ -339,11 +329,36 @@ function setPhase(p) {
   });
 }
 
-function inferPhase(agent, intent) {
+function inferPhase(agent) {
   if (!agent) return;
   if (agent === 'professor' || agent === 'rag') setPhase(1);
   else if (agent === 'ta_problem_gen' || agent === 'ta_problem_solve') setPhase(2);
   else if (agent === 'results') setPhase(3);
+}
+
+// ========== HITL state management ==========
+function setAwaitingFeedback(awaiting) {
+  awaitingFeedback = awaiting;
+  const status = $('voiceStatus');
+  const micBtn = $('micBtn');
+  const textInput = $('textInput');
+  const hitlStatus = $('hitlStatus');
+
+  if (awaiting) {
+    status.textContent = 'Review the response. Speak or type your feedback.';
+    status.className = 'voice-status awaiting';
+    micBtn.classList.add('awaiting');
+    textInput.classList.add('awaiting');
+    textInput.placeholder = 'Say "looks good" to approve, or give feedback...';
+    hitlStatus.classList.add('active');
+  } else {
+    status.textContent = 'Ready for your next question.';
+    status.className = 'voice-status';
+    micBtn.classList.remove('awaiting');
+    textInput.classList.remove('awaiting');
+    textInput.placeholder = 'Or type your message here...';
+    hitlStatus.classList.remove('active');
+  }
 }
 
 // ========== Messages ==========
@@ -351,6 +366,14 @@ function addSystemMsg(text) {
   const d = document.createElement('div');
   d.className = 'msg system-msg';
   d.textContent = text;
+  $('chatArea').appendChild(d);
+  scrollChat();
+}
+
+function addFeedbackPrompt() {
+  const d = document.createElement('div');
+  d.className = 'msg feedback-prompt';
+  d.textContent = 'Say "looks good" to approve, or tell me what to change.';
   $('chatArea').appendChild(d);
   scrollChat();
 }
@@ -495,7 +518,9 @@ async function startRecording() {
     mediaRecorder.start();
     isRecording = true;
     $('micBtn').classList.add('recording');
+    $('micBtn').classList.remove('awaiting');
     $('voiceStatus').textContent = 'Recording... click mic to stop';
+    $('voiceStatus').className = 'voice-status';
   } catch (e) {
     $('voiceStatus').textContent = 'Mic access denied';
   }
@@ -507,11 +532,42 @@ function stopRecording() {
   $('micBtn').classList.remove('recording');
 }
 
+// ========== Handle API response (shared by voice and text) ==========
+function handleResponse(data, latency, transcript) {
+  const meta = {
+    agent: data.agent_name,
+    intent: data.intent,
+    route: data.route_used,
+    ragFound: data.rag_found,
+    ragCount: data.rag_citations_count,
+    citations: data.citations,
+    latency,
+    turn: data.turn_count,
+  };
+
+  inferPhase(data.agent_name);
+  updateStats(meta);
+
+  // Show agent response
+  addAgentMsg(data.response_text, meta);
+
+  // Handle HITL state
+  if (data.awaiting_feedback) {
+    addFeedbackPrompt();
+    setAwaitingFeedback(true);
+  } else {
+    setAwaitingFeedback(false);
+  }
+}
+
 // ========== Send voice ==========
 async function sendVoice(blob) {
   isProcessing = true;
   $('micBtn').classList.add('processing');
-  $('voiceStatus').textContent = 'Processing: STT -> Agent -> TTS...';
+  $('voiceStatus').textContent = awaitingFeedback
+    ? 'Processing your feedback...'
+    : 'Processing: STT -> Agent -> TTS...';
+  $('voiceStatus').className = 'voice-status';
   showTyping();
 
   const c = cfg();
@@ -521,7 +577,6 @@ async function sendVoice(blob) {
   form.append('topic', c.topic);
   form.append('level', c.level);
   form.append('knowledge_mode', c.knowledge);
-  form.append('require_human_review', c.hitl ? 'true' : 'false');
 
   const t0 = Date.now();
 
@@ -536,42 +591,27 @@ async function sendVoice(blob) {
     }
 
     const data = await res.json();
-    lastThreadId = c.sid;
 
     // Show user transcript
     addUserMsg(data.transcript);
 
-    const meta = {
-      agent: data.agent_name, intent: data.intent, route: data.route_used,
-      ragFound: data.rag_found, ragCount: data.rag_citations_count,
-      citations: data.citations, latency, turn: data.turn_count,
-    };
+    // Handle response
+    handleResponse(data, latency);
 
-    inferPhase(data.agent_name, data.intent);
-    updateStats(meta);
-
-    if (data.awaiting_feedback) {
-      addAgentMsg('[Pending HITL Review]\n' + data.response_text, meta);
-      awaitingHitl = true;
-      $('hitlCard').classList.add('active');
-      $('voiceStatus').textContent = 'Awaiting your feedback...';
-      playAudio(data.audio_base64);
-    } else {
-      addAgentMsg(data.response_text, meta);
-      playAudio(data.audio_base64);
-      $('voiceStatus').textContent = 'Click the mic or type to continue';
-    }
+    // Play TTS audio
+    playAudio(data.audio_base64);
   } catch (e) {
     hideTyping();
     addAgentMsg('Error: ' + e.message, { agent: 'system' });
     $('voiceStatus').textContent = 'Error - try again';
+    $('voiceStatus').className = 'voice-status';
   }
 
   isProcessing = false;
   $('micBtn').classList.remove('processing');
 }
 
-// ========== Send text (uses /api/chat, then TTS separately) ==========
+// ========== Send text ==========
 async function sendText() {
   const msg = $('textInput').value.trim();
   if (!msg || isProcessing) return;
@@ -580,19 +620,26 @@ async function sendText() {
   showTyping();
   isProcessing = true;
   $('sendBtn').disabled = true;
-  $('voiceStatus').textContent = 'Thinking...';
+  $('voiceStatus').textContent = awaitingFeedback
+    ? 'Processing your feedback...'
+    : 'Thinking...';
+  $('voiceStatus').className = 'voice-status';
 
   const c = cfg();
   const t0 = Date.now();
 
   try {
+    // Always use /api/chat -- backend auto-detects HITL pending state
     const res = await fetch(c.api + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        session_id: c.sid, message: msg, topic: c.topic,
-        level: c.level, learning_style: 'mixed', knowledge_mode: c.knowledge,
-        require_human_review: c.hitl,
+        session_id: c.sid,
+        message: msg,
+        topic: c.topic,
+        level: c.level,
+        learning_style: 'mixed',
+        knowledge_mode: c.knowledge,
       }),
     });
     const latency = Date.now() - t0;
@@ -604,116 +651,52 @@ async function sendText() {
     }
 
     const data = await res.json();
-    lastThreadId = c.sid;
 
-    const meta = {
-      agent: data.agent_name, intent: data.intent, route: data.route_used,
-      ragFound: data.rag_found, ragCount: data.rag_citations_count,
-      citations: data.citations, latency, turn: data.turn_count,
-    };
+    // Handle response
+    handleResponse(data, latency);
 
-    inferPhase(data.agent_name, data.intent);
-    updateStats(meta);
-
-    if (data.awaiting_feedback) {
-      addAgentMsg('[Pending HITL Review]\n' + data.response_text, meta);
-      awaitingHitl = true;
-      $('hitlCard').classList.add('active');
-      $('voiceStatus').textContent = 'Awaiting your feedback...';
-    } else {
-      addAgentMsg(data.response_text, meta);
-      $('voiceStatus').textContent = 'Ready';
-    }
-
-    // TTS for text input (fire and forget)
+    // TTS for text input
     if (data.response_text && c.voiceOut) {
-      ttsAndPlay(data.response_text);
+      ttsAndPlay(data.response_text, c.api);
     }
   } catch (e) {
     hideTyping();
     addAgentMsg('Error: ' + e.message, { agent: 'system' });
     $('voiceStatus').textContent = 'Error';
+    $('voiceStatus').className = 'voice-status';
   }
 
   isProcessing = false;
   $('sendBtn').disabled = false;
 }
 
-async function ttsAndPlay(text) {
+async function ttsAndPlay(text, apiUrl) {
+  // TTS for text-based input is best-effort
+  // The voice endpoint handles TTS automatically for voice input
   try {
-    const c = cfg();
-    // Use the voice endpoint's TTS by sending a simple request
-    // We'll call the professor chat-voice endpoint as a TTS proxy
-    // Actually, let's just call the MiniMax TTS via a small helper endpoint
-    // For now, we'll skip separate TTS for text input - voice input already has TTS
-  } catch (e) { /* ignore TTS errors for text input */ }
+    // Use the professor chat-voice endpoint as a lightweight TTS proxy
+    const res = await fetch(apiUrl + '/api/professor/chat-voice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: cfg().sid,
+        topic: cfg().topic,
+        message: text,
+        profile: { level: cfg().level, learning_style: 'mixed', pace: 'medium' },
+      }),
+    });
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.play().catch(() => {});
+    }
+  } catch (e) { /* TTS failure is non-fatal */ }
 }
 
 function quickSend(text) {
   $('textInput').value = text;
   sendText();
-}
-
-// ========== HITL Feedback ==========
-async function sendFeedback(action) {
-  if (!awaitingHitl || !lastThreadId) return;
-
-  const feedbackText = $('feedbackText').value.trim();
-  const rerouteTo = $('rerouteTo').value || null;
-  const c = cfg();
-
-  const label = action === 'reroute' ? 'reroute -> ' + (rerouteTo || '?') : action;
-  addUserMsg('[Feedback: ' + label + ']' + (feedbackText ? ' ' + feedbackText : ''));
-
-  $('hitlCard').classList.remove('active');
-  awaitingHitl = false;
-  $('feedbackText').value = '';
-  $('rerouteTo').value = '';
-  showTyping();
-  isProcessing = true;
-
-  const t0 = Date.now();
-  try {
-    const res = await fetch(c.api + '/api/chat/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: c.sid, thread_id: lastThreadId,
-        action, feedback_text: feedbackText, reroute_to: rerouteTo,
-      }),
-    });
-    const latency = Date.now() - t0;
-    hideTyping();
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || 'HTTP ' + res.status);
-    }
-
-    const data = await res.json();
-    const meta = {
-      agent: data.agent_name, intent: data.intent, route: data.route_used,
-      ragFound: data.rag_found, ragCount: data.rag_citations_count,
-      citations: data.citations, latency, turn: data.turn_count,
-    };
-
-    inferPhase(data.agent_name, data.intent);
-    updateStats(meta);
-
-    if (data.awaiting_feedback) {
-      addAgentMsg('[Pending HITL Review]\n' + data.response_text, meta);
-      awaitingHitl = true;
-      $('hitlCard').classList.add('active');
-    } else {
-      addAgentMsg(data.response_text, meta);
-      $('voiceStatus').textContent = 'Ready';
-      if (data.response_text && c.voiceOut) ttsAndPlay(data.response_text);
-    }
-  } catch (e) {
-    hideTyping();
-    addAgentMsg('Feedback error: ' + e.message, { agent: 'system' });
-  }
-  isProcessing = false;
 }
 </script>
 </body>

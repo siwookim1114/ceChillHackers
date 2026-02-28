@@ -3233,7 +3233,7 @@ class OrchestratorChatRequest(BaseModel):
     pace: str = "medium"
     mode: str = "strict"
     knowledge_mode: str = "internal_only"
-    require_human_review: bool = False
+    require_human_review: bool = True   # HITL always on
 
 
 class OrchestratorChatResponse(BaseModel):
@@ -3266,86 +3266,118 @@ def orchestrator_chat(req: OrchestratorChatRequest):
     """Main chat endpoint -- invokes the LangGraph orchestration graph.
 
     Routes the user message through Manager → specialist agent → response.
-    Preserves conversation history across turns via the checkpointer.
-    Detects HITL interrupts and returns awaiting_feedback=True when paused.
+    HITL is always enabled: every agent response pauses for voice/text feedback.
+    Auto-detects pending HITL interrupts: if the graph is paused, the user's
+    message is automatically classified as feedback (approve/revise/reroute)
+    by the Manager and the graph is resumed.
     """
     from agents.graph import get_graph
+    from agents.nodes import classify_hitl_feedback
 
     graph = get_graph()
     thread_id = req.session_id
     config = {"configurable": {"thread_id": thread_id}}
 
-    # Check if this thread already has checkpointed state (i.e., not the
-    # first message). If so, preserve agent_outputs_history and increment
-    # turn_count rather than overwriting with empty lists.
-    existing_state = None
+    # Check graph state: is there a pending HITL interrupt?
+    snapshot = None
     try:
         snapshot = graph.get_state(config)
-        if snapshot and snapshot.values and snapshot.values.get("agent_outputs_history"):
-            existing_state = snapshot.values
     except Exception:
         pass
 
-    turn_count = 0
-    if existing_state:
-        turn_count = existing_state.get("session", {}).get("turn_count", 0) + 1
+    is_hitl_pending = bool(
+        snapshot and snapshot.next and "human_feedback" in snapshot.next
+    )
 
-    input_state = {
-        "user_message": req.message,
-        "user_profile": {
-            "user_id": req.user_id or "anonymous",
-            "level": req.level,
-            "learning_style": req.learning_style,
-            "pace": req.pace,
-        },
-        "session": {
-            "session_id": req.session_id,
-            "topic": req.topic,
-            "subject": req.topic,
-            "mode": req.mode,
-            "knowledge_mode": req.knowledge_mode,
-            "require_human_review": req.require_human_review,
-            "turn_count": turn_count,
-        },
-        # Reset per-turn transient fields
-        "route_history": [],
-        "routing": {},
-        "agent_output": {},
-        "human_feedback": None,
-        "error": None,
-        "final_response": {},
-        "awaiting_feedback": False,
-        "rag_context": "",
-        "rag_citations": [],
-        "rag_found": False,
-    }
+    if is_hitl_pending:
+        # ── HITL feedback path ──
+        # The user's message is feedback on the previous agent response.
+        # The Manager classifies it automatically (no manual buttons needed).
+        from langgraph.types import Command
 
-    # For the first turn, initialize agent_outputs_history.
-    # For subsequent turns, do NOT include it so the checkpointer
-    # preserves the accumulated history from previous turns.
-    if not existing_state:
-        input_state["agent_outputs_history"] = []
+        current_agent = ""
+        if snapshot.values:
+            current_agent = (
+                snapshot.values.get("agent_output", {}).get("agent_name", "")
+            )
 
-    try:
-        result = graph.invoke(input_state, config)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Orchestration error: {exc}")
+        feedback = classify_hitl_feedback(req.message, current_agent)
 
-    # Detect HITL interrupt: graph paused before human_feedback node.
-    # When interrupted, final_response won't be set but agent_output will exist.
+        try:
+            result = graph.invoke(Command(resume=feedback), config)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Feedback resume error: {exc}"
+            )
+
+        turn_count = result.get("session", {}).get("turn_count", 0)
+    else:
+        # ── New query path ──
+        existing_state = (
+            snapshot.values
+            if snapshot and snapshot.values
+            and snapshot.values.get("agent_outputs_history")
+            else None
+        )
+
+        turn_count = 0
+        if existing_state:
+            turn_count = (
+                existing_state.get("session", {}).get("turn_count", 0) + 1
+            )
+
+        input_state = {
+            "user_message": req.message,
+            "user_profile": {
+                "user_id": req.user_id or "anonymous",
+                "level": req.level,
+                "learning_style": req.learning_style,
+                "pace": req.pace,
+            },
+            "session": {
+                "session_id": req.session_id,
+                "topic": req.topic,
+                "subject": req.topic,
+                "mode": req.mode,
+                "knowledge_mode": req.knowledge_mode,
+                "require_human_review": True,   # HITL always on
+                "turn_count": turn_count,
+            },
+            "route_history": [],
+            "routing": {},
+            "agent_output": {},
+            "human_feedback": None,
+            "error": None,
+            "final_response": {},
+            "awaiting_feedback": False,
+            "rag_context": "",
+            "rag_citations": [],
+            "rag_found": False,
+        }
+
+        if not existing_state:
+            input_state["agent_outputs_history"] = []
+
+        try:
+            result = graph.invoke(input_state, config)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Orchestration error: {exc}"
+            )
+
+    # ── Build response (shared by both paths) ──
     final = result.get("final_response") or {}
     routing = result.get("routing") or {}
     agent_output = result.get("agent_output") or {}
+    rag_found = result.get("rag_found", False)
+    rag_citations = result.get("rag_citations", [])
+
     is_interrupted = (
         not final.get("response_text")
         and agent_output.get("response_text")
     )
 
-    rag_found = result.get("rag_found", False)
-    rag_citations = result.get("rag_citations", [])
-
     if is_interrupted:
-        # Graph is paused for HITL -- return agent output as preview
         return OrchestratorChatResponse(
             session_id=req.session_id,
             agent_name=agent_output.get("agent_name", "unknown"),
@@ -3409,14 +3441,19 @@ async def orchestrator_voice(
     pace: str = Form("medium"),
     mode: str = Form("strict"),
     knowledge_mode: str = Form("internal_only"),
-    require_human_review: str = Form("false"),
 ):
     """Voice-in, voice-out orchestration endpoint.
 
     Pipeline: STT (Whisper) → LangGraph orchestration → TTS (MiniMax)
+
+    HITL is always enabled. Auto-detects pending HITL interrupts: if the
+    graph is paused awaiting feedback, the user's speech is automatically
+    classified as feedback (approve/revise/reroute) by the Manager and
+    the graph is resumed. No manual buttons needed.
     """
     import asyncio
     import base64 as b64mod
+
     from services.voice_service import VoiceService
 
     voice = VoiceService()
@@ -3434,64 +3471,104 @@ async def orchestrator_voice(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Speech-to-text error: {exc}")
 
-    # Step 3: Route through LangGraph orchestration
+    # Step 3: Route through LangGraph (auto-detect HITL)
     from agents.graph import get_graph
+    from agents.nodes import classify_hitl_feedback
 
     graph = get_graph()
-    thread_id = session_id
-    graph_config = {"configurable": {"thread_id": thread_id}}
+    graph_config = {"configurable": {"thread_id": session_id}}
 
-    hitl = require_human_review.lower() in ("true", "1", "yes")
-
-    existing_state = None
+    # Check for pending HITL interrupt
+    snapshot = None
     try:
         snapshot = graph.get_state(graph_config)
-        if snapshot and snapshot.values and snapshot.values.get("agent_outputs_history"):
-            existing_state = snapshot.values
     except Exception:
         pass
 
-    turn_count = 0
-    if existing_state:
-        turn_count = existing_state.get("session", {}).get("turn_count", 0) + 1
+    is_hitl_pending = bool(
+        snapshot and snapshot.next and "human_feedback" in snapshot.next
+    )
 
-    input_state = {
-        "user_message": transcript,
-        "user_profile": {
-            "user_id": "voice-user",
-            "level": level,
-            "learning_style": learning_style,
-            "pace": pace,
-        },
-        "session": {
-            "session_id": session_id,
-            "topic": topic,
-            "subject": topic,
-            "mode": mode,
-            "knowledge_mode": knowledge_mode,
-            "require_human_review": hitl,
-            "turn_count": turn_count,
-        },
-        "route_history": [],
-        "routing": {},
-        "agent_output": {},
-        "human_feedback": None,
-        "error": None,
-        "final_response": {},
-        "awaiting_feedback": False,
-        "rag_context": "",
-        "rag_citations": [],
-        "rag_found": False,
-    }
+    if is_hitl_pending:
+        # ── HITL feedback path ──
+        # User's speech is feedback on the previous agent response.
+        from langgraph.types import Command
 
-    if not existing_state:
-        input_state["agent_outputs_history"] = []
+        current_agent = ""
+        if snapshot.values:
+            current_agent = (
+                snapshot.values.get("agent_output", {}).get("agent_name", "")
+            )
 
-    try:
-        result = await asyncio.to_thread(graph.invoke, input_state, graph_config)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Orchestration error: {exc}")
+        feedback = classify_hitl_feedback(transcript, current_agent)
 
+        try:
+            result = await asyncio.to_thread(
+                graph.invoke, Command(resume=feedback), graph_config
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Feedback resume error: {exc}"
+            )
+
+        turn_count = result.get("session", {}).get("turn_count", 0)
+    else:
+        # ── New query path ──
+        existing_state = (
+            snapshot.values
+            if snapshot and snapshot.values
+            and snapshot.values.get("agent_outputs_history")
+            else None
+        )
+
+        turn_count = 0
+        if existing_state:
+            turn_count = (
+                existing_state.get("session", {}).get("turn_count", 0) + 1
+            )
+
+        input_state = {
+            "user_message": transcript,
+            "user_profile": {
+                "user_id": "voice-user",
+                "level": level,
+                "learning_style": learning_style,
+                "pace": pace,
+            },
+            "session": {
+                "session_id": session_id,
+                "topic": topic,
+                "subject": topic,
+                "mode": mode,
+                "knowledge_mode": knowledge_mode,
+                "require_human_review": True,   # HITL always on
+                "turn_count": turn_count,
+            },
+            "route_history": [],
+            "routing": {},
+            "agent_output": {},
+            "human_feedback": None,
+            "error": None,
+            "final_response": {},
+            "awaiting_feedback": False,
+            "rag_context": "",
+            "rag_citations": [],
+            "rag_found": False,
+        }
+
+        if not existing_state:
+            input_state["agent_outputs_history"] = []
+
+        try:
+            result = await asyncio.to_thread(
+                graph.invoke, input_state, graph_config
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Orchestration error: {exc}"
+            )
+
+    # ── Build response (shared by both paths) ──
     final = result.get("final_response") or {}
     routing = result.get("routing") or {}
     agent_output = result.get("agent_output") or {}
@@ -3524,7 +3601,7 @@ async def orchestrator_voice(
         try:
             tts_bytes = await voice.text_to_speech(response_text)
             audio_b64 = b64mod.b64encode(tts_bytes).decode("utf-8")
-        except Exception as tts_exc:
+        except Exception:
             pass  # TTS failure is non-fatal
 
     return OrchestratorVoiceResponse(
