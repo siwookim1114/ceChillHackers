@@ -60,3 +60,12 @@ class ProfessorTurnResponse(BaseModel):
     revealed_final_answer: Literal[False] = False
     next_action: ProfessorNextAction = ProfessorNextAction.CONTINUE
     citations: list[Citation] = Field(default_factory=list)
+
+
+# RAG Mode
+
+class RagMode(str, Enum):
+    """Controls whether the RAG Agent may supplement KB content with LLM knowledge."""
+    INTERNAL_ONLY = "internal_only"
+    EXTERNAL_OK = "external_ok"
+    EXTERNAL_ONLY = "external_only"
