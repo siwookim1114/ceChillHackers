@@ -1,5 +1,6 @@
 import { getAccessToken } from "./auth";
 import type {
+  AttemptGradeResponse,
   Attempt,
   AttemptCreateResponse,
   AuthResponse,
@@ -221,6 +222,26 @@ export function postEvents(attemptId: string, events: ClientEvent[]) {
   return request<EventBatchResponse>(`/api/attempts/${attemptId}/events`, {
     method: "POST",
     body: JSON.stringify({ events }),
+  });
+}
+
+export function gradeAttemptSubmission(
+  attemptId: string,
+  file: File,
+  workNotes?: string,
+  finalAnswer?: string,
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (workNotes && workNotes.trim()) {
+    formData.append("work_notes", workNotes.trim());
+  }
+  if (finalAnswer && finalAnswer.trim()) {
+    formData.append("final_answer", finalAnswer.trim());
+  }
+  return request<AttemptGradeResponse>(`/api/attempts/${attemptId}/grade`, {
+    method: "POST",
+    body: formData,
   });
 }
 

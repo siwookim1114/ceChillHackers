@@ -36,6 +36,18 @@ export type VoiceSessionTurnResponse = {
   audio_mime_type: string;
 };
 
+export type AttemptGradeResponse = {
+  attempt_id: string;
+  solved: boolean;
+  answer_checked_correct: boolean;
+  accepted_events: number;
+  stuck_signals: StuckSignals;
+  parser_diagnostics: Record<string, unknown>;
+  scan_parse: Record<string, unknown>;
+  ta_result: Record<string, unknown>;
+  rag_citations_count: number;
+};
+
 export type EventType =
   | "stroke_add"
   | "stroke_erase"

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
+  gradeAttemptSubmission,
   getAttempt,
   getIntervention,
   postEvents,
@@ -9,7 +10,13 @@ import {
 } from "../api";
 import { AppShell } from "../components/AppShell";
 import { CoachPanel } from "../components/CoachPanel";
-import type { Attempt, ClientEvent, Intervention, StuckSignals } from "../types";
+import type {
+  Attempt,
+  AttemptGradeResponse,
+  ClientEvent,
+  Intervention,
+  StuckSignals,
+} from "../types";
 
 const INITIAL_SIGNALS: StuckSignals = {
   idle_ms: 0,
@@ -109,6 +116,7 @@ export function SolvePage() {
   const [stage, setStage] = useState<SolveStage>("ready");
   const [workText, setWorkText] = useState("");
   const [answer, setAnswer] = useState("");
+  const [uploadedWorkFile, setUploadedWorkFile] = useState<File | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState<string | null>(null);
   const [lectureMuted, setLectureMuted] = useState(true);
@@ -124,6 +132,8 @@ export function SolvePage() {
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceAudioUrl, setVoiceAudioUrl] = useState<string | null>(null);
+  const [gradeBusy, setGradeBusy] = useState(false);
+  const [gradeResult, setGradeResult] = useState<AttemptGradeResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   const queueRef = useRef<ClientEvent[]>([]);
@@ -300,6 +310,8 @@ export function SolvePage() {
       return;
     }
     setError(null);
+    setGradeResult(null);
+    setUploadedWorkFile(file);
     setUploadedFileName(file.name);
     if (uploadedPreviewUrl) {
       URL.revokeObjectURL(uploadedPreviewUrl);
@@ -345,17 +357,36 @@ export function SolvePage() {
   };
 
   const submitAnswer = async () => {
-    if (!uploadedFileName) {
+    if (!uploadedWorkFile || !uploadedFileName) {
       setError("Please upload your solved work image or file first.");
       return;
     }
-    enqueueEvent({
-      type: "answer_submit",
-      payload: {
-        answer
+    if (!attemptId) {
+      setError("Missing attempt id");
+      return;
+    }
+
+    setGradeBusy(true);
+    setError(null);
+    try {
+      // Flush queued interaction events first so TA grading sees recent solving signals.
+      await flushQueue();
+      const result = await gradeAttemptSubmission(
+        attemptId,
+        uploadedWorkFile,
+        workText,
+        answer,
+      );
+      setGradeResult(result);
+      setSignals(result.stuck_signals);
+      if (result.solved) {
+        navigate(`/result/${attemptId}`);
       }
-    });
-    await flushQueue();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to grade submission");
+    } finally {
+      setGradeBusy(false);
+    }
   };
 
   const appendVoiceMessage = (role: VoiceRole, text: string) => {
@@ -554,6 +585,17 @@ export function SolvePage() {
       )}
     </section>
   );
+
+  const taResult: Record<string, unknown> = gradeResult?.ta_result ?? {};
+  const partialScoreRaw = taResult["partial_score"];
+  const partialScore = typeof partialScoreRaw === "object" && partialScoreRaw !== null
+    ? (partialScoreRaw as Record<string, unknown>)
+    : null;
+  const parserDiagnostics: Record<string, unknown> = gradeResult?.parser_diagnostics ?? {};
+  const parserWarningsRaw = parserDiagnostics["warnings"];
+  const parserWarnings = Array.isArray(parserWarningsRaw)
+    ? parserWarningsRaw.filter((item): item is string => typeof item === "string")
+    : [];
 
   if (loading) {
     return (
@@ -793,10 +835,40 @@ export function SolvePage() {
                     placeholder="Type your final answer…"
                   />
                   <button className="btn-primary" onClick={submitAnswer} type="button">
-                    Submit
+                    {gradeBusy ? "Submitting..." : "Submit"}
                   </button>
                 </div>
               </div>
+
+              {gradeResult && (
+                <section className="panel-card">
+                  <div className="workspace-head">
+                    <div>
+                      <h3>TA Grading Result</h3>
+                      <p>
+                        Verdict: {String(taResult["overall_verdict"] ?? "unknown")} · Score:{" "}
+                        {partialScore && typeof partialScore["percent"] === "number"
+                          ? `${partialScore["percent"]}%`
+                          : "N/A"}
+                      </p>
+                    </div>
+                    <div className="create-workspace-kpis">
+                      <span className="create-kpi-chip">
+                        answer check: {gradeResult.answer_checked_correct ? "correct" : "not yet"}
+                      </span>
+                      <span className="create-kpi-chip">
+                        RAG cites: {gradeResult.rag_citations_count}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="muted">
+                    {String(taResult["feedback_message"] ?? "No feedback message returned.")}
+                  </p>
+                  {parserWarnings.length > 0 && (
+                    <p className="muted">Parser notes: {parserWarnings.join(" | ")}</p>
+                  )}
+                </section>
+              )}
             </div>
           </section>
 

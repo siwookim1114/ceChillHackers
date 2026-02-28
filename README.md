@@ -74,6 +74,17 @@ AWS_SESSION_TOKEN=
 
 The backend stores S3 metadata (`storage_key`, `file_url`) in `lecture_files`.
 
+Lecture note PDFs are also synced into the RAG docs prefix for retrieval:
+
+```bash
+RAG_DOCS_PREFIX=docs/
+```
+
+Upload flow:
+- lecture file upload -> S3 `docs/lecture_slides/...`
+- PDF mirror -> S3 `docs/{course_subject}/...` for RAG indexing
+- grading/chat retrieval reads those RAG documents
+
 ## Voice lecture orchestration (Featherless + Whisper + MiniMax)
 
 The solve page supports a mediated voice tutor flow:
@@ -86,7 +97,7 @@ Set API keys in root `.env`:
 
 ```bash
 FEATHERLESS_API_BASE_URL=https://api.featherless.ai/v1
-FEATHERLESS_API_KEY=...
+FEATHERLESSAI_API_KEY=...
 FEATHERLESS_MODEL=Qwen/Qwen2.5-3B-Instruct
 FEATHERLESS_HTTP_REFERER=http://localhost:5173
 FEATHERLESS_X_TITLE=TutorCoach
@@ -139,6 +150,7 @@ You can override with `VITE_API_URL`.
 - `POST /api/attempts`
 - `GET /api/attempts/{attempt_id}`
 - `POST /api/attempts/{attempt_id}/events`
+- `POST /api/attempts/{attempt_id}/grade` (file upload -> scan parse -> TA agent grading)
 - `GET /api/attempts/{attempt_id}/intervention`
 - `GET /api/attempts/{attempt_id}/summary`
 

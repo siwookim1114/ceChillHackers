@@ -82,7 +82,7 @@ def build_professor_config(
             "providers": {
                 "featherless": {
                     "base_url": "https://api.featherless.ai/v1",
-                    "api_key_env": "FEATHERLESS_API_KEY",
+                    "api_key_env": "FEATHERLESSAI_API_KEY",
                     "timeout_sec": 15,
                     "user_agent": "ceChillHackers-professor/1.0",
                 }
@@ -172,7 +172,7 @@ def test_live_mode_not_enabled_when_provider_is_not_featherless(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PROFESSOR_USE_LIVE_FEATHERLESS", "1")
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
 
     tool = ProfessorRespondTool(
         config=build_professor_config(
@@ -186,7 +186,7 @@ def test_live_mode_not_enabled_when_provider_is_not_featherless(
 def test_live_path_accepts_plain_json_string_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(use_live_featherless=True)
     )
@@ -216,7 +216,7 @@ def test_live_path_accepts_plain_json_string_content(
 def test_live_path_accepts_json_embedded_in_plain_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(use_live_featherless=True)
     )
@@ -245,7 +245,7 @@ def test_live_path_accepts_json_embedded_in_plain_text(
 def test_live_path_normalizes_minor_schema_drift_without_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(use_live_featherless=True)
     )
@@ -278,7 +278,7 @@ def test_live_path_normalizes_minor_schema_drift_without_fallback(
 def test_live_path_maps_legacy_hint_and_encouragement_labels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(use_live_featherless=True)
     )
@@ -325,7 +325,7 @@ def test_live_path_maps_legacy_hint_and_encouragement_labels(
 def test_live_path_enforces_selected_strategy_in_live_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(use_live_featherless=True)
     )
@@ -350,7 +350,7 @@ def test_live_path_enforces_selected_strategy_in_live_mode(
 def test_live_path_retries_once_on_semantic_validation_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(
             use_live_featherless=True,
@@ -401,7 +401,7 @@ def test_live_path_retries_once_on_semantic_validation_failure(
 def test_live_path_raises_when_semantic_validation_fails_after_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(
             use_live_featherless=True,
@@ -494,7 +494,7 @@ def test_live_path_fallback_on_http_error(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(use_live_featherless=True)
     )
@@ -522,7 +522,7 @@ def test_live_path_fallback_on_http_error(
 def test_live_path_raises_when_fallback_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(
             use_live_featherless=True,
@@ -544,7 +544,7 @@ def test_live_path_raises_when_fallback_disabled(
 def test_live_path_retries_transient_error_then_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(
             use_live_featherless=True,
@@ -602,7 +602,7 @@ def test_live_path_retries_transient_error_then_succeeds(
 def test_live_path_uses_runtime_timeout_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     tool = ProfessorRespondTool(
         config=build_professor_config(
             use_live_featherless=True,
@@ -655,7 +655,7 @@ def test_invoke_professor_pipeline_returns_valid_contract(
         "config",
         build_professor_config(socratic_default=False, citations_enabled=False),
     )
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
     _patch_live_response(
         monkeypatch,
         json.dumps(
@@ -700,7 +700,7 @@ def test_invoke_professor_uses_loaded_system_prompt(
         "load_system_prompt",
         lambda: "CUSTOM_SYSTEM_PROMPT_FOR_TEST",
     )
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
 
     captured_payload: dict[str, Any] = {}
 
@@ -753,7 +753,7 @@ def test_invoke_professor_applies_config_mode_default_when_payload_mode_missing(
             fallback_on_live_error=False,
         ),
     )
-    monkeypatch.setenv("FEATHERLESS_API_KEY", "test-key")
+    monkeypatch.setenv("FEATHERLESSAI_API_KEY", "test-key")
 
     captured_payload: dict[str, Any] = {}
 

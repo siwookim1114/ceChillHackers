@@ -105,7 +105,7 @@ S3_LECTURE_UPLOAD_URI = os.getenv(
 FEATHERLESS_API_BASE_URL = os.getenv(
     "FEATHERLESS_API_BASE_URL", "https://api.featherless.ai/v1"
 ).strip()
-FEATHERLESS_API_KEY = os.getenv("FEATHERLESS_API_KEY", "").strip()
+FEATHERLESSAI_API_KEY = os.getenv("FEATHERLESSAI_API_KEY", "").strip()
 FEATHERLESS_MODEL = os.getenv("FEATHERLESS_MODEL", "Qwen/Qwen2.5-3B-Instruct").strip()
 FEATHERLESS_TIMEOUT_SEC = float(os.getenv("FEATHERLESS_TIMEOUT_SEC", "30"))
 FEATHERLESS_HTTP_REFERER = os.getenv("FEATHERLESS_HTTP_REFERER", FRONTEND_URL).strip()
@@ -140,6 +140,7 @@ MINIMAX_TTS_TIMEOUT_SEC = float(os.getenv("MINIMAX_TTS_TIMEOUT_SEC", "30"))
 VOICE_SESSION_TTL_SEC = int(os.getenv("VOICE_SESSION_TTL_SEC", "3600"))
 VOICE_SESSION_MAX_TURNS = int(os.getenv("VOICE_SESSION_MAX_TURNS", "14"))
 AWS_REGION = os.getenv("AWS_REGION", "").strip()
+RAG_DOCS_PREFIX = os.getenv("RAG_DOCS_PREFIX", "docs/").strip()
 AWS_S3_FORCE_PATH_STYLE = os.getenv("AWS_S3_FORCE_PATH_STYLE", "").strip().lower() in {
     "1",
     "true",
@@ -219,6 +220,19 @@ def sanitized_file_name(file_name: str) -> str:
     return cleaned[:180] or "uploaded_file"
 
 
+def normalized_s3_prefix(prefix: str) -> str:
+    cleaned = prefix.strip().lstrip("/")
+    if cleaned and not cleaned.endswith("/"):
+        cleaned = f"{cleaned}/"
+    return cleaned
+
+
+def sanitized_rag_subject(value: str) -> str:
+    lowered = value.strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+    return normalized[:80] or "general"
+
+
 def get_s3_client() -> Any:
     global _S3_CLIENT
     if _S3_CLIENT is not None:
@@ -285,6 +299,71 @@ def upload_lecture_file_to_s3(
         ) from exc
 
     return key, f"s3://{LECTURE_S3_LOCATION.bucket}/{key}"
+
+
+def sync_pdf_to_rag_docs(
+    *,
+    user_id: str,
+    course_id: str,
+    lecture_id: str,
+    course_title: str,
+    file_name: str,
+    content_type: Optional[str],
+    file_data: bytes,
+) -> Optional[str]:
+    if LECTURE_S3_LOCATION is None:
+        return None
+
+    ext = Path(file_name).suffix.lower()
+    ctype = (content_type or "").lower()
+    if ext != ".pdf" and "pdf" not in ctype:
+        return None
+
+    docs_prefix = normalized_s3_prefix(RAG_DOCS_PREFIX or "docs/")
+    subject = sanitized_rag_subject(course_title)
+    safe_name = sanitized_file_name(file_name)
+    timestamp = utcnow().strftime("%Y%m%dT%H%M%SZ")
+    random_suffix = uuid4().hex[:10]
+    rag_key = (
+        f"{docs_prefix}{subject}/"
+        f"{user_id}/{course_id}/{lecture_id}/{timestamp}_{random_suffix}_{safe_name}"
+    )
+
+    put_object_args: dict[str, Any] = {
+        "Bucket": LECTURE_S3_LOCATION.bucket,
+        "Key": rag_key,
+        "Body": file_data,
+    }
+    if content_type:
+        put_object_args["ContentType"] = content_type
+
+    s3_client = get_s3_client()
+    s3_client.put_object(**put_object_args)
+    return rag_key
+
+
+def warmup_rag_index_async(*, course_title: str, lecture_title: str, file_name: str) -> None:
+    def _worker() -> None:
+        try:
+            from agents.rag_agent import RagAgent
+
+            rag_agent = RagAgent()
+            rag_agent.run(
+                {
+                    "prompt": (
+                        f"Warm up retrieval index for course '{course_title}', "
+                        f"lecture '{lecture_title}', file '{file_name}'."
+                    ),
+                    "caller": "professor",
+                    "subject": sanitized_rag_subject(course_title),
+                    "mode": "internal_only",
+                    "retrieve_only": True,
+                }
+            )
+        except Exception as exc:
+            logger.warning("RAG warm-up skipped for uploaded lecture file: %s", exc)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 @dataclass
@@ -384,7 +463,7 @@ def call_featherless_chat_via_curl(payload: dict[str, Any], request_url: str) ->
         "POST",
         request_url,
         "-H",
-        f"Authorization: Bearer {FEATHERLESS_API_KEY}",
+        f"Authorization: Bearer {FEATHERLESSAI_API_KEY}",
         "-H",
         "Content-Type: application/json",
         "-H",
@@ -463,10 +542,10 @@ def call_featherless_chat_via_curl(payload: dict[str, Any], request_url: str) ->
 
 
 def call_featherless_chat(messages: list[dict[str, str]]) -> str:
-    if not FEATHERLESS_API_KEY:
+    if not FEATHERLESSAI_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="FEATHERLESS_API_KEY is not configured.",
+            detail="FEATHERLESSAI_API_KEY is not configured.",
         )
 
     payload = {
@@ -488,7 +567,7 @@ def call_featherless_chat(messages: list[dict[str, str]]) -> str:
         return content.strip()
 
     headers = {
-        "Authorization": f"Bearer {FEATHERLESS_API_KEY}",
+        "Authorization": f"Bearer {FEATHERLESSAI_API_KEY}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": FEATHERLESS_USER_AGENT or "TutorCoach/1.0",
@@ -1248,6 +1327,18 @@ class EventBatchResponse(BaseModel):
     solved: bool
 
 
+class AttemptGradeResponse(BaseModel):
+    attempt_id: str
+    solved: bool
+    answer_checked_correct: bool
+    accepted_events: int
+    stuck_signals: StuckSignals
+    parser_diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    scan_parse: Dict[str, Any] = Field(default_factory=dict)
+    ta_result: Dict[str, Any] = Field(default_factory=dict)
+    rag_citations_count: int = 0
+
+
 class AttemptDetailResponse(BaseModel):
     attempt_id: str
     started_at: datetime
@@ -1434,6 +1525,57 @@ def should_emit_intervention(attempt: AttemptState, level: int, force: bool = Fa
     if attempt.last_intervention_at is None:
         return True
     return utcnow() - attempt.last_intervention_at > timedelta(seconds=15)
+
+
+def to_agent_learning_style(style: Optional[LearningStyle]) -> str:
+    style_map = {
+        "explanation": "mixed",
+        "question": "textual",
+        "problem_solving": "example_first",
+    }
+    if style in style_map:
+        return style_map[style]
+    return "mixed"
+
+
+def to_agent_pace(pace: Optional[LearningPace]) -> str:
+    pace_map = {
+        "slow": "slow",
+        "normal": "medium",
+        "fast": "fast",
+    }
+    if pace in pace_map:
+        return pace_map[pace]
+    return "medium"
+
+
+def default_ta_rubric() -> list[dict[str, Any]]:
+    return [
+        {
+            "criterion_id": "setup",
+            "description": "Sets up the equation or representation from the problem statement.",
+            "max_points": 3.0,
+            "error_tags": ["CONCEPT_GAP", "MISREAD"],
+        },
+        {
+            "criterion_id": "method",
+            "description": "Applies a valid method and keeps transformations logically consistent.",
+            "max_points": 4.0,
+            "error_tags": ["PROCEDURE_SLIP", "JUSTIFICATION_MISSING"],
+        },
+        {
+            "criterion_id": "accuracy",
+            "description": "Carries arithmetic/algebraic steps with minimal calculation mistakes.",
+            "max_points": 2.0,
+            "error_tags": ["CALCULATION_ERROR"],
+        },
+        {
+            "criterion_id": "conclusion",
+            "description": "States a final answer that matches the solved expression.",
+            "max_points": 1.0,
+            "error_tags": ["JUSTIFICATION_MISSING"],
+        },
+    ]
 
 
 def resolve_problem(payload: AttemptCreateRequest) -> Problem:
@@ -2337,12 +2479,15 @@ def upload_lecture_file_db(
 
     s3_key: Optional[str] = None
     file_url: Optional[str] = None
+    rag_doc_key: Optional[str] = None
+    course_title = ""
+    lecture_title = ""
 
     with db_connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT l.id
+                SELECT l.id, l.title AS lecture_title, c.title AS course_title
                 FROM lectures l
                 JOIN courses c ON c.id = l.course_id
                 WHERE c.user_id = %s::uuid
@@ -2354,6 +2499,8 @@ def upload_lecture_file_db(
             lecture_row = cur.fetchone()
             if not lecture_row:
                 raise HTTPException(status_code=404, detail="Lecture not found")
+            course_title = str(lecture_row.get("course_title") or "").strip()
+            lecture_title = str(lecture_row.get("lecture_title") or "").strip()
 
             s3_key, file_url = upload_lecture_file_to_s3(
                 user_id=user_id,
@@ -2363,6 +2510,18 @@ def upload_lecture_file_db(
                 content_type=content_type,
                 file_data=file_data,
             )
+            try:
+                rag_doc_key = sync_pdf_to_rag_docs(
+                    user_id=user_id,
+                    course_id=course_id,
+                    lecture_id=lecture_id,
+                    course_title=course_title,
+                    file_name=file_name,
+                    content_type=content_type,
+                    file_data=file_data,
+                )
+            except Exception as exc:
+                logger.warning("RAG sync skipped for lecture file '%s': %s", file_name, exc)
 
             cur.execute(
                 """
@@ -2403,6 +2562,12 @@ def upload_lecture_file_db(
 
     if not row:
         raise HTTPException(status_code=500, detail="Failed to upload lecture file")
+    if rag_doc_key:
+        warmup_rag_index_async(
+            course_title=course_title or "general",
+            lecture_title=lecture_title or "lecture",
+            file_name=file_name,
+        )
     return lecture_file_from_row(row)
 
 
@@ -2740,9 +2905,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Professor Agent routes (text + voice)
-from app.routes.professor import router as professor_router
-app.include_router(professor_router)
+# Professor Agent routes (text + voice) — optional dependency.
+try:
+    from app.routes.professor import router as professor_router
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Professor routes disabled due to missing dependency: %s",
+        exc,
+    )
+else:
+    app.include_router(professor_router)
 
 
 @app.on_event("startup")
@@ -3186,6 +3358,141 @@ def ingest_events(attempt_id: str, payload: EventBatchRequest) -> EventBatchResp
         intervention=intervention,
         solved=attempt.solved_at is not None,
     )
+
+
+if MULTIPART_AVAILABLE:
+    @app.post("/api/attempts/{attempt_id}/grade", response_model=AttemptGradeResponse)
+    async def grade_attempt_submission(
+        attempt_id: str,
+        file: UploadFile = File(...),
+        work_notes: Optional[str] = Form(None),
+        final_answer: Optional[str] = Form(None),
+        authorization: Optional[str] = Header(None, alias="Authorization"),
+    ) -> AttemptGradeResponse:
+        if DB_ENABLED:
+            attempt = load_attempt_state_db(attempt_id)
+        else:
+            attempt = ATTEMPTS.get(attempt_id)
+        if not attempt:
+            raise HTTPException(status_code=404, detail="Attempt not found")
+
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Submitted file is empty")
+        if len(file_bytes) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Submitted file must be <= 5MB")
+
+        notes_text = (work_notes or "").strip()
+        answer_text = (final_answer or "").strip()
+        scan_request = ScanParserRequest(
+            image_bytes_b64=base64.b64encode(file_bytes).decode("utf-8"),
+            image_mime_type=file.content_type,
+            attempt_id=attempt.id,
+            topic=attempt.problem.unit,
+            problem_statement_hint=attempt.problem.prompt,
+            ocr_text=notes_text or None,
+            answer_hint=answer_text or None,
+        )
+        try:
+            parsed_scan = parse_scan_submission(scan_request)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to parse submitted work: {exc}",
+            ) from exc
+
+        try:
+            from agents.problem_solve_ta_agent import invoke_problem_solve_ta
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"TA grading agent is unavailable: {exc}",
+            ) from exc
+
+        auth_user = get_optional_auth_user(authorization)
+        profile = {
+            "level": "intermediate",
+            "learning_style": to_agent_learning_style(
+                auth_user.learning_style if auth_user else None
+            ),
+            "pace": to_agent_pace(auth_user.learning_pace if auth_user else None),
+        }
+        signals = compute_signals(attempt.events)
+        ta_payload = {
+            "request_id": uuid4().hex,
+            "user_id": auth_user.id if auth_user else (attempt.guest_id or "guest"),
+            "attempt_id": attempt.id,
+            "session_id": attempt.id,
+            "profile": profile,
+            "mode": "internal_only",
+            "problem_ref": {
+                "problem_id": attempt.problem.id,
+                "statement": attempt.problem.prompt,
+                "topic": sanitized_rag_subject(attempt.problem.unit or attempt.problem.title),
+                "unit": attempt.problem.unit or None,
+            },
+            "scan_parse": parsed_scan.scan_parse.model_dump(mode="json"),
+            "reference_solution_outline": [
+                "Match the final expression to the expected answer format.",
+                f"Expected answer key: {attempt.problem.answer_key}",
+            ],
+            "rubric": default_ta_rubric(),
+            "stuck_signals": {
+                "idle_ms": signals.idle_ms,
+                "erase_count_delta": signals.erase_count_delta,
+                "repeated_error_count": signals.repeated_error_count,
+                "stuck_score": signals.stuck_score,
+            },
+            "language": "en",
+        }
+        try:
+            ta_result = invoke_problem_solve_ta(ta_payload)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"TA grading failed: {exc}",
+            ) from exc
+
+        submission_answer = answer_text or (parsed_scan.scan_parse.final_answer or "")
+        event_payload: dict[str, Any] = {
+            "answer": submission_answer,
+            "agent_overall_verdict": ta_result.get("overall_verdict"),
+            "agent_feedback_message": ta_result.get("feedback_message", ""),
+        }
+        partial_score = ta_result.get("partial_score")
+        if isinstance(partial_score, dict):
+            event_payload["agent_partial_score_percent"] = partial_score.get("percent")
+
+        batch = ingest_events(
+            attempt_id,
+            EventBatchRequest(
+                events=[ClientEvent(type="answer_submit", payload=event_payload)]
+            ),
+        )
+        answer_checked_correct = check_answer(attempt.problem, submission_answer)
+
+        return AttemptGradeResponse(
+            attempt_id=attempt_id,
+            solved=batch.solved,
+            answer_checked_correct=answer_checked_correct,
+            accepted_events=batch.accepted,
+            stuck_signals=batch.stuck_signals,
+            parser_diagnostics=parsed_scan.diagnostics.model_dump(mode="json"),
+            scan_parse=parsed_scan.scan_parse.model_dump(mode="json"),
+            ta_result=ta_result,
+            rag_citations_count=len(ta_result.get("citations", [])),
+        )
+else:
+    @app.post("/api/attempts/{attempt_id}/grade", response_model=AttemptGradeResponse)
+    def grade_attempt_submission_unavailable(
+        attempt_id: str,
+        authorization: Optional[str] = Header(None, alias="Authorization"),
+    ) -> AttemptGradeResponse:
+        _ = attempt_id, authorization
+        raise HTTPException(
+            status_code=503,
+            detail="Grading upload requires python-multipart. Install backend requirements.",
+        )
 
 
 @app.get("/api/attempts/{attempt_id}/intervention", response_model=Optional[Intervention])
