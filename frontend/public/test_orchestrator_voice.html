@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Tutor - Voice Orchestration</title>
+<style>
+  :root {
+    --bg: #0a0a12; --surface: #12121e; --surface2: #1a1a2e;
+    --border: #2a2a3e; --text: #e8e8f0; --muted: #8888a0;
+    --accent: #6c63ff; --accent2: #8b7dff;
+    --green: #4ade80; --orange: #fbbf24; --red: #f87171;
+    --blue: #60a5fa; --purple: #a78bfa; --cyan: #22d3ee;
+    --professor: #60a5fa; --ta-gen: #4ade80; --ta-solve: #fbbf24;
+    --rag: #a78bfa; --manager: #6c63ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+  }
+
+  /* Header */
+  .header { padding: 24px 24px 0; text-align: center; width: 100%; max-width: 960px; }
+  .header h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+  .header h1 span { color: var(--accent); }
+  .header .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  /* Phase indicator */
+  .phase-bar {
+    display: flex; gap: 2px; margin: 16px auto 0; width: 100%; max-width: 960px; padding: 0 24px;
+  }
+  .phase-step {
+    flex: 1; padding: 8px 12px; font-size: 11px; font-weight: 600;
+    text-align: center; border-radius: 6px; background: var(--surface);
+    color: var(--muted); border: 1px solid var(--border); transition: all 0.3s;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .phase-step.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .phase-step.done { background: #1a2e1a; color: var(--green); border-color: #2a3e2a; }
+
+  /* Main layout */
+  .main { display: flex; gap: 16px; width: 100%; max-width: 960px; padding: 16px 24px; flex: 1; min-height: 0; }
+
+  /* Chat panel */
+  .chat-panel {
+    flex: 1; display: flex; flex-direction: column; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden; min-height: 550px;
+  }
+  .chat-messages {
+    flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px;
+  }
+
+  .msg {
+    max-width: 88%; padding: 12px 16px; border-radius: 12px; font-size: 14px;
+    line-height: 1.6; word-break: break-word; animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.agent { align-self: flex-start; background: var(--surface2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg.system-msg { align-self: center; background: transparent; color: var(--muted); font-size: 13px; text-align: center; max-width: 100%; }
+  .msg.feedback-prompt {
+    align-self: center; background: var(--surface2); color: var(--orange);
+    font-size: 12px; text-align: center; max-width: 100%; border: 1px dashed var(--orange);
+    padding: 8px 16px; border-radius: 8px;
+  }
+
+  .msg .agent-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 2px 8px; border-radius: 10px; margin-bottom: 6px;
+  }
+  .badge-professor { background: #60a5fa22; color: var(--professor); }
+  .badge-ta_problem_gen { background: #4ade8022; color: var(--ta-gen); }
+  .badge-ta_problem_solve { background: #fbbf2422; color: var(--ta-solve); }
+  .badge-rag { background: #a78bfa22; color: var(--rag); }
+  .badge-manager { background: #6c63ff22; color: var(--manager); }
+  .badge-system { background: #f8717122; color: var(--red); }
+
+  .msg .route-info {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; align-items: center;
+  }
+  .route-info .route-tag {
+    font-size: 10px; padding: 1px 6px; border-radius: 8px;
+    background: var(--border); color: var(--muted);
+  }
+  .rag-tag { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+  .rag-found { background: #4ade8022; color: var(--green); }
+  .rag-none { background: #f8717122; color: var(--red); }
+
+  .msg .msg-text { white-space: pre-wrap; }
+
+  /* Citations */
+  .citations {
+    margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px;
+  }
+  .citations summary {
+    cursor: pointer; font-size: 12px; font-weight: 600; color: var(--purple);
+  }
+  .citations .cite-list { margin-top: 6px; }
+  .cite-item {
+    padding: 4px 8px; margin-bottom: 3px; border-radius: 4px;
+    background: #0a0a1266; font-size: 11px; display: flex; justify-content: space-between; gap: 8px;
+  }
+  .cite-doc { color: var(--purple); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .cite-loc { color: var(--muted); white-space: nowrap; }
+  .cite-snippet { color: var(--muted); font-size: 10px; margin-top: 2px; display: block; }
+
+  /* Typing indicator */
+  .typing { display: flex; gap: 4px; padding: 12px 16px; align-self: flex-start; }
+  .typing span {
+    width: 8px; height: 8px; background: var(--muted); border-radius: 50%;
+    animation: typingBounce 1.4s infinite both;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typingBounce { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; } 40% { transform: scale(1); opacity: 1; } }
+
+  /* Voice controls */
+  .voice-bar {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; background: var(--surface);
+  }
+  .mic-btn {
+    width: 52px; height: 52px; border-radius: 50%; border: 2px solid var(--border);
+    background: var(--surface2); cursor: pointer; display: flex; align-items: center;
+    justify-content: center; transition: all 0.2s; flex-shrink: 0;
+  }
+  .mic-btn:hover { border-color: var(--accent); background: #1a1a3e; }
+  .mic-btn.recording { border-color: var(--red); background: #2a1a1a; animation: pulse 1.5s infinite; }
+  .mic-btn.processing { border-color: var(--orange); background: #2a2a1a; cursor: wait; }
+  .mic-btn.awaiting { border-color: var(--orange); background: #2a2a1a; }
+  .mic-btn svg { width: 24px; height: 24px; fill: var(--muted); }
+  .mic-btn:hover svg { fill: var(--accent); }
+  .mic-btn.recording svg { fill: var(--red); }
+  .mic-btn.processing svg { fill: var(--orange); }
+  .mic-btn.awaiting svg { fill: var(--orange); }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.4); } 50% { box-shadow: 0 0 0 14px rgba(248,113,113,0); } }
+
+  .text-input {
+    flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 14px; border-radius: 10px;
+    font-size: 14px; outline: none;
+  }
+  .text-input:focus { border-color: var(--accent); }
+  .text-input::placeholder { color: var(--muted); }
+  .text-input.awaiting { border-color: var(--orange); }
+  .text-input.awaiting::placeholder { color: var(--orange); }
+
+  .send-btn {
+    padding: 10px 16px; border-radius: 10px; border: none;
+    background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .send-btn:hover { background: var(--accent2); }
+  .send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .voice-status { font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px; padding: 0 16px 8px; }
+  .voice-status.awaiting { color: var(--orange); font-weight: 600; }
+
+  /* Side panel */
+  .side-panel {
+    width: 260px; display: flex; flex-direction: column; gap: 12px; flex-shrink: 0;
+  }
+  .panel-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; font-size: 12px;
+  }
+  .panel-card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 8px; }
+  .panel-card .cfg-row { display: flex; flex-direction: column; margin-bottom: 6px; }
+  .panel-card .cfg-row label { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .panel-card select, .panel-card input[type="text"] {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 8px; border-radius: 4px; font-size: 12px;
+  }
+  .panel-card .toggle-row {
+    display: flex; align-items: center; gap: 6px; margin-top: 4px;
+  }
+  .panel-card .toggle-row label { font-size: 12px; color: var(--text); cursor: pointer; }
+
+  /* Quick test */
+  .quick-row { display: flex; gap: 4px; flex-wrap: wrap; }
+  .quick-row button {
+    padding: 4px 8px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--muted); font-size: 10px; cursor: pointer;
+  }
+  .quick-row button:hover { color: var(--text); border-color: var(--accent); }
+
+  /* Stats card */
+  .stat-row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .stat-label { color: var(--muted); }
+  .stat-val { font-weight: 600; }
+
+  /* HITL status indicator */
+  .hitl-status {
+    padding: 8px 12px; border-radius: 8px; font-size: 11px;
+    text-align: center; display: none;
+    background: #2a2a1a; border: 1px solid var(--orange); color: var(--orange);
+  }
+  .hitl-status.active { display: block; }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .main { flex-direction: column; }
+    .side-panel { width: 100%; flex-direction: row; flex-wrap: wrap; }
+    .side-panel .panel-card { flex: 1; min-width: 200px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>AI Tutor</span> Voice Orchestration</h1>
+  <div class="sub">Speak to learn. The manager routes you to the right agent. All responses go through HITL review.</div>
+</div>
+
+<div class="phase-bar">
+  <div class="phase-step active" id="phase0">Phase 0: Orchestration</div>
+  <div class="phase-step" id="phase1">Phase 1: Learning</div>
+  <div class="phase-step" id="phase2">Phase 2: Problems</div>
+  <div class="phase-step" id="phase3">Phase 3: Results</div>
+</div>
+
+<div class="main">
+  <!-- Chat panel -->
+  <div class="chat-panel">
+    <div class="chat-messages" id="chatArea"></div>
+    <div class="voice-status" id="voiceStatus">Click the mic or type to begin</div>
+    <div class="voice-bar">
+      <button class="mic-btn" id="micBtn" onclick="toggleRecording()">
+        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+      </button>
+      <input class="text-input" id="textInput" placeholder="Or type your message here..." onkeydown="if(event.key==='Enter')sendText()" />
+      <button class="send-btn" id="sendBtn" onclick="sendText()">Send</button>
+    </div>
+  </div>
+
+  <!-- Side panel -->
+  <div class="side-panel">
+    <!-- Config -->
+    <div class="panel-card">
+      <h3>Session Config</h3>
+      <div class="cfg-row"><label>API URL</label><input type="text" id="apiUrl" value="http://localhost:8000" /></div>
+      <div class="cfg-row"><label>Topic</label><input type="text" id="topic" value="linear algebra" /></div>
+      <div class="cfg-row"><label>Session</label><input type="text" id="sessionId" value="" /></div>
+      <div class="cfg-row"><label>Level</label>
+        <select id="level"><option value="beginner">Beginner</option><option value="intermediate" selected>Intermediate</option><option value="advanced">Advanced</option></select>
+      </div>
+      <div class="cfg-row"><label>Knowledge</label>
+        <select id="knowledgeMode"><option value="internal_only" selected>Internal Only (FAISS)</option><option value="external_ok">External OK</option><option value="external_only">External Only (Web)</option></select>
+      </div>
+      <div class="toggle-row"><input type="checkbox" id="voiceOutput" checked /><label for="voiceOutput">Voice Output</label></div>
+    </div>
+
+    <!-- Quick tests -->
+    <div class="panel-card">
+      <h3>Quick Tests</h3>
+      <div class="quick-row">
+        <button onclick="quickSend('I want to learn concepts today')">Learn</button>
+        <button onclick="quickSend('Explain eigenvalues')">Professor</button>
+        <button onclick="quickSend('I want to solve some problems')">Problems</button>
+        <button onclick="quickSend('Check my work: x = 2')">TA Solve</button>
+        <button onclick="quickSend('I want easier problems')">Easier</button>
+        <button onclick="quickSend('Challenge me')">Harder</button>
+      </div>
+      <div class="quick-row" style="margin-top:6px;">
+        <button onclick="quickSend('Looks good')">Approve</button>
+        <button onclick="quickSend('Explain differently')">Revise</button>
+        <button onclick="quickSend('Give me problems instead')">Reroute</button>
+      </div>
+    </div>
+
+    <!-- HITL Status -->
+    <div class="panel-card hitl-status" id="hitlStatus">
+      Awaiting your feedback. Speak or type:<br/>
+      <b>"Looks good"</b> to approve<br/>
+      <b>"Explain differently"</b> to revise<br/>
+      <b>"Give me problems instead"</b> to reroute
+    </div>
+
+    <!-- Stats -->
+    <div class="panel-card" id="statsCard">
+      <h3>Last Response</h3>
+      <div class="stat-row"><span class="stat-label">Agent</span><span class="stat-val" id="statAgent">--</span></div>
+      <div class="stat-row"><span class="stat-label">Route</span><span class="stat-val" id="statRoute">--</span></div>
+      <div class="stat-row"><span class="stat-label">Intent</span><span class="stat-val" id="statIntent">--</span></div>
+      <div class="stat-row"><span class="stat-label">Latency</span><span class="stat-val" id="statLatency">--</span></div>
+      <div class="stat-row"><span class="stat-label">RAG</span><span class="stat-val" id="statRag">--</span></div>
+      <div class="stat-row"><span class="stat-label">Turn</span><span class="stat-val" id="statTurn">0</span></div>
+      <div class="stat-row"><span class="stat-label">HITL</span><span class="stat-val" id="statHitl" style="color:var(--green);">Always On</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ========== State ==========
+const $ = id => document.getElementById(id);
+let mediaRecorder = null, audioChunks = [], isRecording = false, isProcessing = false;
+let awaitingFeedback = false;
+let currentPhase = 0;
+
+// Generate unique session ID on load
+$('sessionId').value = 'voice-' + Date.now().toString(36);
+
+// ========== Init ==========
+window.addEventListener('DOMContentLoaded', () => {
+  addSystemMsg("Hello! What would you like to do today?");
+  addSystemMsg('Speak or type: "I want to learn lecture concepts" or "I want to solve some problems"');
+});
+
+// ========== Config ==========
+function cfg() {
+  return {
+    api: $('apiUrl').value.replace(/\/+$/, ''),
+    topic: $('topic').value || 'general',
+    sid: $('sessionId').value,
+    level: $('level').value,
+    knowledge: $('knowledgeMode').value,
+    voiceOut: $('voiceOutput').checked,
+  };
+}
+
+// ========== Phase tracking ==========
+function setPhase(p) {
+  currentPhase = p;
+  ['phase0','phase1','phase2','phase3'].forEach((id, i) => {
+    $(id).className = 'phase-step' + (i < p ? ' done' : i === p ? ' active' : '');
+  });
+}
+
+function inferPhase(agent) {
+  if (!agent) return;
+  if (agent === 'professor' || agent === 'rag') setPhase(1);
+  else if (agent === 'ta_problem_gen' || agent === 'ta_problem_solve') setPhase(2);
+  else if (agent === 'results') setPhase(3);
+}
+
+// ========== HITL state management ==========
+function setAwaitingFeedback(awaiting) {
+  awaitingFeedback = awaiting;
+  const status = $('voiceStatus');
+  const micBtn = $('micBtn');
+  const textInput = $('textInput');
+  const hitlStatus = $('hitlStatus');
+
+  if (awaiting) {
+    status.textContent = 'Review the response. Speak or type your feedback.';
+    status.className = 'voice-status awaiting';
+    micBtn.classList.add('awaiting');
+    textInput.classList.add('awaiting');
+    textInput.placeholder = 'Say "looks good" to approve, or give feedback...';
+    hitlStatus.classList.add('active');
+  } else {
+    status.textContent = 'Ready for your next question.';
+    status.className = 'voice-status';
+    micBtn.classList.remove('awaiting');
+    textInput.classList.remove('awaiting');
+    textInput.placeholder = 'Or type your message here...';
+    hitlStatus.classList.remove('active');
+  }
+}
+
+// ========== Messages ==========
+function addSystemMsg(text) {
+  const d = document.createElement('div');
+  d.className = 'msg system-msg';
+  d.textContent = text;
+  $('chatArea').appendChild(d);
+  scrollChat();
+}
+
+function addFeedbackPrompt() {
+  const d = document.createElement('div');
+  d.className = 'msg feedback-prompt';
+  d.textContent = 'Say "looks good" to approve, or tell me what to change.';
+  $('chatArea').appendChild(d);
+  scrollChat();
+}
+
+function addUserMsg(text) {
+  const d = document.createElement('div');
+  d.className = 'msg user';
+  d.textContent = text;
+  $('chatArea').appendChild(d);
+  scrollChat();
+}
+
+function addAgentMsg(text, data) {
+  const d = document.createElement('div');
+  d.className = 'msg agent';
+
+  // Route info bar
+  const info = document.createElement('div');
+  info.className = 'route-info';
+
+  if (data.agent) {
+    const b = document.createElement('span');
+    b.className = 'agent-badge badge-' + data.agent;
+    b.textContent = data.agent.replace(/_/g, ' ');
+    info.appendChild(b);
+  }
+  if (data.intent) {
+    const t = document.createElement('span');
+    t.className = 'route-tag';
+    t.textContent = data.intent;
+    info.appendChild(t);
+  }
+  if (data.route) {
+    const t = document.createElement('span');
+    t.className = 'route-tag';
+    t.textContent = 'route: ' + data.route;
+    info.appendChild(t);
+  }
+  if (data.ragFound !== undefined) {
+    const r = document.createElement('span');
+    r.className = 'rag-tag ' + (data.ragFound ? 'rag-found' : 'rag-none');
+    r.textContent = data.ragFound ? 'RAG: ' + (data.ragCount || 0) + ' sources' : 'RAG: no match';
+    info.appendChild(r);
+  }
+  if (data.latency) {
+    const l = document.createElement('span');
+    l.className = 'route-tag';
+    l.style.color = 'var(--green)';
+    l.textContent = data.latency + 'ms';
+    info.appendChild(l);
+  }
+  d.appendChild(info);
+
+  // Text
+  const txt = document.createElement('div');
+  txt.className = 'msg-text';
+  txt.textContent = text;
+  d.appendChild(txt);
+
+  // Citations
+  if (data.citations && data.citations.length > 0) {
+    const cit = document.createElement('details');
+    cit.className = 'citations';
+    const sum = document.createElement('summary');
+    sum.textContent = 'Sources (' + data.citations.length + ' citations)';
+    cit.appendChild(sum);
+
+    const list = document.createElement('div');
+    list.className = 'cite-list';
+    data.citations.forEach(c => {
+      const item = document.createElement('div');
+      item.className = 'cite-item';
+      const doc = c.doc || c.title || c.source_id || 'source';
+      const loc = c.page ? 'p.' + c.page : (c.location || '');
+      const snippet = c.snippet || '';
+      const url = c.url || '';
+      item.innerHTML =
+        '<div><span class="cite-doc">' + escHtml(doc) + '</span>' +
+        (url ? ' <a href="' + escHtml(url) + '" target="_blank" style="color:var(--cyan);font-size:10px;">link</a>' : '') +
+        (snippet ? '<span class="cite-snippet">' + escHtml(snippet.slice(0, 120)) + '</span>' : '') +
+        '</div>' +
+        '<span class="cite-loc">' + escHtml(loc) + '</span>';
+      list.appendChild(item);
+    });
+    cit.appendChild(list);
+    d.appendChild(cit);
+  }
+
+  $('chatArea').appendChild(d);
+  scrollChat();
+}
+
+function showTyping() {
+  const d = document.createElement('div');
+  d.className = 'typing'; d.id = 'typingIndicator';
+  d.innerHTML = '<span></span><span></span><span></span>';
+  $('chatArea').appendChild(d);
+  scrollChat();
+}
+function hideTyping() { const t = $('typingIndicator'); if (t) t.remove(); }
+
+function scrollChat() { const c = $('chatArea'); c.scrollTop = c.scrollHeight; }
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function updateStats(data) {
+  $('statAgent').textContent = data.agent || '--';
+  $('statAgent').style.color = {professor:'var(--professor)', ta_problem_gen:'var(--ta-gen)', ta_problem_solve:'var(--ta-solve)', rag:'var(--rag)'}[data.agent] || 'var(--text)';
+  $('statRoute').textContent = data.route || '--';
+  $('statIntent').textContent = data.intent || '--';
+  $('statLatency').textContent = data.latency ? data.latency + 'ms' : '--';
+  $('statLatency').style.color = data.latency < 3000 ? 'var(--green)' : data.latency < 8000 ? 'var(--orange)' : 'var(--red)';
+  $('statRag').textContent = data.ragFound ? data.ragCount + ' sources' : 'no match';
+  $('statRag').style.color = data.ragFound ? 'var(--green)' : 'var(--red)';
+  $('statTurn').textContent = data.turn || 0;
+}
+
+// ========== Audio playback ==========
+let currentAudio = null;
+function playAudio(b64) {
+  if (!b64 || !cfg().voiceOut) return;
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  currentAudio = new Audio('data:audio/mp3;base64,' + b64);
+  currentAudio.play().catch(() => {});
+}
+
+// ========== Voice recording ==========
+function toggleRecording() {
+  if (isProcessing) return;
+  isRecording ? stopRecording() : startRecording();
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    audioChunks = [];
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      sendVoice(new Blob(audioChunks, { type: 'audio/webm' }));
+    };
+    mediaRecorder.start();
+    isRecording = true;
+    $('micBtn').classList.add('recording');
+    $('micBtn').classList.remove('awaiting');
+    $('voiceStatus').textContent = 'Recording... click mic to stop';
+    $('voiceStatus').className = 'voice-status';
+  } catch (e) {
+    $('voiceStatus').textContent = 'Mic access denied';
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  isRecording = false;
+  $('micBtn').classList.remove('recording');
+}
+
+// ========== Handle API response (shared by voice and text) ==========
+function handleResponse(data, latency, transcript) {
+  const meta = {
+    agent: data.agent_name,
+    intent: data.intent,
+    route: data.route_used,
+    ragFound: data.rag_found,
+    ragCount: data.rag_citations_count,
+    citations: data.citations,
+    latency,
+    turn: data.turn_count,
+  };
+
+  inferPhase(data.agent_name);
+  updateStats(meta);
+
+  // Show agent response
+  addAgentMsg(data.response_text, meta);
+
+  // Handle HITL state
+  if (data.awaiting_feedback) {
+    addFeedbackPrompt();
+    setAwaitingFeedback(true);
+  } else {
+    setAwaitingFeedback(false);
+  }
+}
+
+// ========== Send voice ==========
+async function sendVoice(blob) {
+  isProcessing = true;
+  $('micBtn').classList.add('processing');
+  $('voiceStatus').textContent = awaitingFeedback
+    ? 'Processing your feedback...'
+    : 'Processing: STT -> Agent -> TTS...';
+  $('voiceStatus').className = 'voice-status';
+  showTyping();
+
+  const c = cfg();
+  const form = new FormData();
+  form.append('audio', blob, 'recording.webm');
+  form.append('session_id', c.sid);
+  form.append('topic', c.topic);
+  form.append('level', c.level);
+  form.append('knowledge_mode', c.knowledge);
+
+  const t0 = Date.now();
+
+  try {
+    const res = await fetch(c.api + '/api/chat/voice', { method: 'POST', body: form });
+    const latency = Date.now() - t0;
+    hideTyping();
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || 'HTTP ' + res.status);
+    }
+
+    const data = await res.json();
+
+    // Show user transcript
+    addUserMsg(data.transcript);
+
+    // Handle response
+    handleResponse(data, latency);
+
+    // Play TTS audio
+    playAudio(data.audio_base64);
+  } catch (e) {
+    hideTyping();
+    addAgentMsg('Error: ' + e.message, { agent: 'system' });
+    $('voiceStatus').textContent = 'Error - try again';
+    $('voiceStatus').className = 'voice-status';
+  }
+
+  isProcessing = false;
+  $('micBtn').classList.remove('processing');
+}
+
+// ========== Send text ==========
+async function sendText() {
+  const msg = $('textInput').value.trim();
+  if (!msg || isProcessing) return;
+  $('textInput').value = '';
+  addUserMsg(msg);
+  showTyping();
+  isProcessing = true;
+  $('sendBtn').disabled = true;
+  $('voiceStatus').textContent = awaitingFeedback
+    ? 'Processing your feedback...'
+    : 'Thinking...';
+  $('voiceStatus').className = 'voice-status';
+
+  const c = cfg();
+  const t0 = Date.now();
+
+  try {
+    // Always use /api/chat -- backend auto-detects HITL pending state
+    const res = await fetch(c.api + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: c.sid,
+        message: msg,
+        topic: c.topic,
+        level: c.level,
+        learning_style: 'mixed',
+        knowledge_mode: c.knowledge,
+      }),
+    });
+    const latency = Date.now() - t0;
+    hideTyping();
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || 'HTTP ' + res.status);
+    }
+
+    const data = await res.json();
+
+    // Handle response
+    handleResponse(data, latency);
+
+    // TTS for text input
+    if (data.response_text && c.voiceOut) {
+      ttsAndPlay(data.response_text, c.api);
+    }
+  } catch (e) {
+    hideTyping();
+    addAgentMsg('Error: ' + e.message, { agent: 'system' });
+    $('voiceStatus').textContent = 'Error';
+    $('voiceStatus').className = 'voice-status';
+  }
+
+  isProcessing = false;
+  $('sendBtn').disabled = false;
+}
+
+async function ttsAndPlay(text, apiUrl) {
+  // TTS for text-based input is best-effort
+  // The voice endpoint handles TTS automatically for voice input
+  try {
+    // Use the professor chat-voice endpoint as a lightweight TTS proxy
+    const res = await fetch(apiUrl + '/api/professor/chat-voice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: cfg().sid,
+        topic: cfg().topic,
+        message: text,
+        profile: { level: cfg().level, learning_style: 'mixed', pace: 'medium' },
+      }),
+    });
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.play().catch(() => {});
+    }
+  } catch (e) { /* TTS failure is non-fatal */ }
+}
+
+function quickSend(text) {
+  $('textInput').value = text;
+  sendText();
+}
+</script>
+</body>
+</html>

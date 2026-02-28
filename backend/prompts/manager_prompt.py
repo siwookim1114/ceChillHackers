@@ -15,8 +15,10 @@ theory, or explanation. Examples: "What is Bayes theorem?", "Explain eigenvalues
 "Why does integration work this way?", "I don't understand recursion".
 
 2. **problem_gen** -- Student wants practice problems, exercises, drills, or \
-quiz questions. Examples: "Give me practice problems on derivatives", \
-"I want to practice linear algebra", "More exercises please".
+quiz questions. Also covers "I want to solve problems" (requesting problems \
+to work on). Examples: "Give me practice problems on derivatives", \
+"I want to practice linear algebra", "More exercises please", \
+"I want to solve some probability problems", "Let's do some exercises".
 
 3. **problem_solve** -- Student has submitted their own work and wants it \
 evaluated, graded, or checked. Examples: "Check my solution", \

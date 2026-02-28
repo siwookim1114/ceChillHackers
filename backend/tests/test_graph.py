@@ -31,6 +31,8 @@ from agents.graph_state import (
 )
 from agents.nodes import (
     _classify_intent,
+    _infer_difficulty_curve,
+    classify_hitl_feedback,
     manager_node,
     respond_node,
 )
@@ -588,3 +590,397 @@ class TestGraphE2E:
         last_call_args = mock_agent.run.call_args
         request_msg = last_call_args[0][0].message
         assert "Conversation history" in request_msg or "Previous" in request_msg
+
+
+# ===================================================================
+# Block 8: Difficulty Escalation / De-escalation
+# ===================================================================
+
+class TestDifficultyEscalation:
+    """Test that difficulty-related queries route correctly and adjust difficulty."""
+
+    @pytest.mark.parametrize("query", [
+        "I want an easier problem",
+        "Give me something easier",
+        "This is too hard",
+        "easier question please",
+        "simpler exercises",
+        "too difficult for me",
+    ])
+    def test_easier_queries_route_to_problem_gen(self, query):
+        result = _classify_intent(query, {})
+        assert result["route"] == "ta_problem_gen", f"'{query}' should route to ta_problem_gen"
+
+    @pytest.mark.parametrize("query", [
+        "Give me a harder problem",
+        "I want something more challenging",
+        "This is too easy",
+        "harder questions please",
+        "challenge me",
+        "step it up",
+    ])
+    def test_harder_queries_route_to_problem_gen(self, query):
+        result = _classify_intent(query, {})
+        assert result["route"] == "ta_problem_gen", f"'{query}' should route to ta_problem_gen"
+
+    def test_manager_handles_easier_problem_signal(self):
+        """When problem_solve returns easier_problem, manager re-routes to ta_problem_gen."""
+        state = _base_state(
+            agent_output=AgentOutput(
+                agent_name="ta_problem_solve",
+                response_text="You scored low.",
+                next_action="easier_problem",
+            ),
+        )
+        result = manager_node(state)
+        assert result["routing"]["route"] == "ta_problem_gen"
+        assert result["routing"]["intent"] == "difficulty_adjustment"
+
+    def test_manager_handles_escalate_signal(self):
+        """When problem_solve returns escalate, manager re-routes to ta_problem_gen."""
+        state = _base_state(
+            agent_output=AgentOutput(
+                agent_name="ta_problem_solve",
+                response_text="Perfect score!",
+                next_action="escalate",
+            ),
+        )
+        result = manager_node(state)
+        assert result["routing"]["route"] == "ta_problem_gen"
+        assert result["routing"]["intent"] == "difficulty_adjustment"
+
+    def test_manager_handles_request_hint_signal(self):
+        """When problem_solve returns request_hint, manager re-routes to ta_problem_gen."""
+        state = _base_state(
+            agent_output=AgentOutput(
+                agent_name="ta_problem_solve",
+                response_text="You seem stuck.",
+                next_action="request_hint",
+            ),
+        )
+        result = manager_node(state)
+        assert result["routing"]["route"] == "ta_problem_gen"
+        assert result["routing"]["intent"] == "difficulty_adjustment"
+
+    def test_route_after_agent_easier_problem(self):
+        """easier_problem next_action should route back to manager."""
+        state = _base_state(
+            agent_output=AgentOutput(next_action="easier_problem"),
+        )
+        assert route_after_agent(state) == "manager"
+
+    def test_route_after_agent_request_hint(self):
+        """request_hint next_action should route back to manager."""
+        state = _base_state(
+            agent_output=AgentOutput(next_action="request_hint"),
+        )
+        assert route_after_agent(state) == "manager"
+
+
+class TestDifficultyCurveInference:
+    """Test _infer_difficulty_curve context-aware difficulty adjustment."""
+
+    def test_default_intermediate(self):
+        state = _base_state()
+        current, target, errors = _infer_difficulty_curve(state)
+        assert current == "easy"
+        assert target == "medium"
+
+    def test_default_beginner(self):
+        state = _base_state(user_profile=UserProfile(
+            user_id="u1", level="beginner",
+            learning_style="mixed", pace="medium",
+        ))
+        current, target, errors = _infer_difficulty_curve(state)
+        assert current == "very_easy"
+        assert target == "easy"
+
+    def test_default_advanced(self):
+        state = _base_state(user_profile=UserProfile(
+            user_id="u1", level="advanced",
+            learning_style="mixed", pace="medium",
+        ))
+        current, target, errors = _infer_difficulty_curve(state)
+        assert current == "medium"
+        assert target == "hard"
+
+    def test_easier_from_problem_solve(self):
+        """When problem_solve says easier_problem, target should be lower."""
+        state = _base_state(
+            agent_output=AgentOutput(
+                agent_name="ta_problem_solve",
+                response_text="Low score",
+                next_action="easier_problem",
+                structured_data={"detected_error_tags": ["CONCEPT_GAP"]},
+            ),
+            agent_outputs_history=[
+                AgentOutput(
+                    agent_name="ta_problem_gen",
+                    structured_data={"problems": [{"difficulty": "medium"}]},
+                ),
+            ],
+        )
+        current, target, errors = _infer_difficulty_curve(state)
+        assert current == "medium"
+        assert target == "easy"  # one step down from medium
+        assert "CONCEPT_GAP" in errors
+
+    def test_escalate_from_problem_solve(self):
+        """When problem_solve says escalate, target should be higher."""
+        state = _base_state(
+            agent_output=AgentOutput(
+                agent_name="ta_problem_solve",
+                response_text="Great job!",
+                next_action="escalate",
+                structured_data={"detected_error_tags": []},
+            ),
+            agent_outputs_history=[
+                AgentOutput(
+                    agent_name="ta_problem_gen",
+                    structured_data={"problems": [{"difficulty": "medium"}]},
+                ),
+            ],
+        )
+        current, target, errors = _infer_difficulty_curve(state)
+        assert current == "medium"
+        assert target == "hard"  # one step up from medium
+
+    def test_user_requests_easier_overrides(self):
+        """Explicit 'too hard' in user message should lower target."""
+        state = _base_state(user_message="This is too hard, give me easier problems")
+        current, target, errors = _infer_difficulty_curve(state)
+        # Default intermediate is easy→medium, "too hard" should lower target
+        assert target in ("very_easy", "easy")  # lowered
+
+    def test_user_requests_harder_overrides(self):
+        """Explicit 'too easy' in user message should raise target."""
+        state = _base_state(user_message="Too easy, challenge me")
+        current, target, errors = _infer_difficulty_curve(state)
+        assert target == "medium"  # raised from default easy→medium
+
+    def test_error_tags_forwarded(self):
+        """Detected error tags from problem_solve should be forwarded."""
+        state = _base_state(
+            agent_output=AgentOutput(
+                agent_name="ta_problem_solve",
+                response_text="Issues found",
+                next_action="easier_problem",
+                structured_data={
+                    "detected_error_tags": ["CONCEPT_GAP", "PROCEDURE_SLIP"],
+                },
+            ),
+            agent_outputs_history=[
+                AgentOutput(
+                    agent_name="ta_problem_gen",
+                    structured_data={"problems": [{"difficulty": "easy"}]},
+                ),
+            ],
+        )
+        _, _, errors = _infer_difficulty_curve(state)
+        assert "CONCEPT_GAP" in errors
+        assert "PROCEDURE_SLIP" in errors
+
+
+# ===================================================================
+# Block 9: HITL Route History Reset
+# ===================================================================
+
+class TestHITLRouteHistoryReset:
+    """Verify that HITL feedback handlers reset route_history."""
+
+    def test_feedback_approve_resets_history(self):
+        state = _base_state(
+            human_feedback=HumanFeedback(action="approve"),
+            route_history=["professor", "ta_problem_gen", "professor"],
+        )
+        result = manager_node(state)
+        assert result["route_history"] == ["respond"]
+
+    def test_feedback_reroute_resets_history(self):
+        state = _base_state(
+            human_feedback=HumanFeedback(
+                action="reroute",
+                reroute_to="rag",
+                feedback_text="Try RAG",
+            ),
+            route_history=["professor", "ta_problem_gen"],
+        )
+        result = manager_node(state)
+        assert result["route_history"] == ["rag"]
+
+    def test_feedback_revise_resets_history(self):
+        state = _base_state(
+            human_feedback=HumanFeedback(
+                action="revise",
+                feedback_text="More detail please",
+            ),
+            route_history=["professor"],
+        )
+        result = manager_node(state)
+        assert result["route_history"] == ["professor"]
+
+    def test_feedback_cancel_resets_history(self):
+        state = _base_state(
+            human_feedback=HumanFeedback(action="cancel"),
+            route_history=["professor", "rag", "ta_problem_gen"],
+        )
+        result = manager_node(state)
+        assert result["route_history"] == ["respond"]
+
+    def test_feedback_reroute_includes_feedback_text(self):
+        """Reroute should include feedback_text in user_message."""
+        state = _base_state(
+            user_message="Explain Bayes theorem",
+            human_feedback=HumanFeedback(
+                action="reroute",
+                reroute_to="ta_problem_gen",
+                feedback_text="I want practice instead",
+            ),
+        )
+        result = manager_node(state)
+        assert "[Student feedback: I want practice instead]" in result["user_message"]
+
+    def test_hitl_reroute_survives_multiple_cycles(self):
+        """After HITL reset, route_history should allow multiple reroutes without loop detection."""
+        # Cycle 1: reroute to professor
+        state = _base_state(
+            human_feedback=HumanFeedback(action="reroute", reroute_to="professor"),
+            route_history=["ta_problem_gen", "professor", "ta_problem_gen"],
+        )
+        result = manager_node(state)
+        assert result["route_history"] == ["professor"]
+
+        # Cycle 2: reroute to professor again — should NOT trigger loop detection
+        # because route_history was reset
+        state2 = _base_state(
+            routing=RoutingDecision(route="professor"),
+            route_history=result["route_history"],
+        )
+        assert route_from_manager(state2) == "professor"  # should NOT bail to respond
+
+
+# ===================================================================
+# Block 10: "Solve problems" routing fix
+# ===================================================================
+
+class TestSolveProblemsRouting:
+    """Test that 'solve problems' queries route to ta_problem_gen, not professor."""
+
+    @pytest.mark.parametrize("query,expected_route", [
+        ("I want to solve some probability problems", "ta_problem_gen"),
+        ("I want to solve problems", "ta_problem_gen"),
+        ("solve some math problems", "ta_problem_gen"),
+        ("let's solve some exercises", "ta_problem_gen"),
+        ("I'd like to try some practice questions", "ta_problem_gen"),
+        ("I need to work on some problems", "ta_problem_gen"),
+        ("do some calculus problems", "ta_problem_gen"),
+        ("try some linear algebra exercises", "ta_problem_gen"),
+        ("tackle some probability questions", "ta_problem_gen"),
+        ("I want to practice linear algebra", "ta_problem_gen"),
+        ("let's do some problems", "ta_problem_gen"),
+    ])
+    def test_solve_problems_routes_to_gen(self, query, expected_route):
+        result = _classify_intent(query, {})
+        assert result["route"] == expected_route, (
+            f"'{query}' expected {expected_route}, got {result['route']} "
+            f"(intent={result['intent']})"
+        )
+
+    def test_check_my_solution_still_routes_to_solve(self):
+        """Grading queries must still route to ta_problem_solve."""
+        result = _classify_intent("Check my solution for problem 3", {})
+        assert result["route"] == "ta_problem_solve"
+
+    def test_explain_concept_still_routes_to_professor(self):
+        """Pure concept queries must still route to professor."""
+        result = _classify_intent("Explain what eigenvalues are", {})
+        assert result["route"] == "professor"
+
+
+# ===================================================================
+# Block 11: HITL Feedback Classifier (voice-driven)
+# ===================================================================
+
+class TestHITLFeedbackClassifier:
+    """Test classify_hitl_feedback for voice-driven HITL."""
+
+    # --- Approve signals ---
+    @pytest.mark.parametrize("text", [
+        "yes",
+        "Yeah",
+        "ok",
+        "looks good",
+        "that's great",
+        "perfect",
+        "thanks",
+        "sounds good",
+        "I like this",
+        "great, thank you",
+        "LGTM",
+        "continue",
+        "go ahead",
+    ])
+    def test_approve_signals(self, text):
+        result = classify_hitl_feedback(text, "professor")
+        assert result["action"] == "approve", (
+            f"'{text}' should be classified as approve, got {result['action']}"
+        )
+
+    # --- Revise signals ---
+    @pytest.mark.parametrize("text", [
+        "no, that's wrong",
+        "I don't understand",
+        "explain it differently",
+        "too complicated",
+        "more detail please",
+        "can you elaborate",
+        "unclear",
+        "try again",
+        "too short",
+        "confused",
+    ])
+    def test_revise_signals(self, text):
+        result = classify_hitl_feedback(text, "professor")
+        assert result["action"] == "revise", (
+            f"'{text}' should be classified as revise, got {result['action']}"
+        )
+
+    # --- Reroute signals ---
+    def test_reroute_to_problem_gen(self):
+        """When current agent is professor, asking for problems should reroute."""
+        result = classify_hitl_feedback(
+            "give me practice problems instead", "professor"
+        )
+        assert result["action"] == "reroute"
+        assert result["reroute_to"] == "ta_problem_gen"
+
+    def test_reroute_to_professor(self):
+        """When current agent is ta_problem_gen, asking for explanation should reroute."""
+        result = classify_hitl_feedback(
+            "actually explain this concept to me", "ta_problem_gen"
+        )
+        assert result["action"] == "reroute"
+        assert result["reroute_to"] == "professor"
+
+    def test_no_reroute_to_same_agent(self):
+        """If feedback maps to the same agent, it should be revise, not reroute."""
+        result = classify_hitl_feedback(
+            "explain it more simply", "professor"
+        )
+        # "explain" matches professor, but current_agent IS professor → no reroute
+        assert result["action"] != "reroute"
+
+    def test_empty_feedback_is_approve(self):
+        result = classify_hitl_feedback("", "professor")
+        assert result["action"] == "approve"
+
+    def test_ambiguous_feedback_defaults_to_revise(self):
+        """Ambiguous/unclear feedback should default to revise."""
+        result = classify_hitl_feedback(
+            "hmm I was thinking about something else entirely", "professor"
+        )
+        assert result["action"] == "revise"
+
+    def test_feedback_preserves_text(self):
+        result = classify_hitl_feedback("explain differently", "professor")
+        assert result["feedback_text"] == "explain differently"
