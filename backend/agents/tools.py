@@ -6,10 +6,10 @@ calling agents (Professor, TA, Manager) -- no agent-specific logic here.
 
 Tools
 -----
-RetrieveContextTool   - Semantic search over Bedrock Knowledge Base
-UploadDocumentTool    - PDF/slide upload to S3 + KB ingestion trigger
+RetrieveContextTool      - Semantic search over Bedrock Knowledge Base
+UploadDocumentTool       - PDF/slide upload to S3 + KB ingestion trigger
 CheckIngestionStatusTool - Poll ingestion job progress
-ListDocumentsTool     - List available documents (metadata only)
+ListDocumentsTool        - List available documents (metadata only)
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from langchain_core.tools import BaseTool
 from utils.helpers import parse_tool_input
 
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # 1. RetrieveContextTool
@@ -144,7 +145,9 @@ class RetrieveContextTool(BaseTool):
         })
 
 
+# ---------------------------------------------------------------------------
 # 2. UploadDocumentTool
+# ---------------------------------------------------------------------------
 
 class UploadDocumentTool(BaseTool):
     """Upload a document to S3 and trigger Bedrock Knowledge Base ingestion.
@@ -259,7 +262,9 @@ class UploadDocumentTool(BaseTool):
             return json.dumps({"error": str(exc)})
 
 
+# ---------------------------------------------------------------------------
 # 3. CheckIngestionStatusTool
+# ---------------------------------------------------------------------------
 
 class CheckIngestionStatusTool(BaseTool):
     """Poll the ingestion status of a previously uploaded document."""
@@ -325,7 +330,10 @@ class CheckIngestionStatusTool(BaseTool):
                          ingestion_job_id, exc)
             return json.dumps({"error": str(exc)})
 
+
+# ---------------------------------------------------------------------------
 # 4. ListDocumentsTool
+# ---------------------------------------------------------------------------
 
 class ListDocumentsTool(BaseTool):
     """List documents available in the Knowledge Base -- metadata only."""
