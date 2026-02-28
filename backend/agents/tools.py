@@ -5,7 +5,6 @@ This module intentionally avoids persistence and raw-content logging.
 
 from __future__ import annotations
 
-from typing import Any
 import json
 import uuid
 import base64
@@ -22,105 +21,116 @@ from backend.agents.schemas.professor import (
     ProfessorTurnResponse,
     ProfessorTurnStrategy,
 )
-from config.config_loader import load_config
-from utils.helpers import parse_tool_input
+from backend.utils.helpers import parse_tool_input
 
 PROFESSOR_CONFIG_PATH = "agents.professor"
 
-## Professor Agent Tools
-def get_professor_runtime_config() -> dict[str, Any]:
-    """Load professor runtime config from config.yaml as single source of truth."""
-    app_config = load_config()
-    professor_config = app_config.get(PROFESSOR_CONFIG_PATH)
 
-    if not isinstance(professor_config, dict):
-        raise ValueError(f"Missing or invalid config mapping at '{PROFESSOR_CONFIG_PATH}'")
+class ProfessorRespondTool(BaseTool):
+    """Professor tutoring tool with strict request/response schema handling."""
 
-    llm_cfg = professor_config.get("llm")
-    tutoring_cfg = professor_config.get("tutoring")
-    if not isinstance(llm_cfg, dict):
-        raise ValueError("Missing or invalid config mapping at 'agents.professor.llm'")
-    if not isinstance(tutoring_cfg, dict):
-        raise ValueError("Missing or invalid config mapping at 'agents.professor.tutoring'")
-    if not llm_cfg.get("provider"):
-        raise ValueError("Missing required config key: 'agents.professor.llm.provider'")
-    if not llm_cfg.get("model_id"):
-        raise ValueError("Missing required config key: 'agents.professor.llm.model_id'")
-
-    return professor_config
-
-
-def validate_professor_turn_request(payload: dict[str, Any]) -> ProfessorTurnRequest:
-    """Validate inbound payload against the strict Professor request schema."""
-    return ProfessorTurnRequest.model_validate(payload)
-
-
-def sanitize_for_log(request: ProfessorTurnRequest) -> dict[str, Any]:
-    """Return metadata-only logs. Never include raw student content."""
-    return {
-        "session_id": request.session_id,
-        "mode": request.mode.value,
-        "topic": request.topic,
-        "message_length": len(request.student_message),
-        "profile_level": request.profile.level,
-    }
-
-
-def retrieve_citations_for_professor(request: ProfessorTurnRequest) -> list[Citation]:
-    """Temporary citation stub until RAG/KB is connected."""
-    config = get_professor_runtime_config()
-    citations_enabled = bool(config.get("tutoring", {}).get("citations_enabled", True))
-    if not citations_enabled:
-        return []
-
-    if request.mode is ProfessorMode.STRICT:
-        source_id = "local_stub_strict"
-    else:
-        source_id = "local_stub_convenience"
-
-    return [
-        Citation(
-            source_id=source_id,
-            title=f"Intro to {request.topic}",
-            snippet=f"Core concept recap for {request.topic}.",
-            url=None,
-        )
-    ]
-
-
-def build_professor_response(request: ProfessorTurnRequest) -> ProfessorTurnResponse:
-    """Generate deterministic mock response that always respects no-answer-reveal policy."""
-    config = get_professor_runtime_config()
-    citations = retrieve_citations_for_professor(request)
-    socratic_default = bool(config.get("tutoring", {}).get("socratic_default", True))
-    if socratic_default:
-        strategy = ProfessorTurnStrategy.SOCRATIC_QUESTION
-        question = (
-            f"Before we solve it, can you explain in one sentence what the key idea in "
-            f"{request.topic} is?"
-        )
-    else:
-        strategy = ProfessorTurnStrategy.CONCEPT_EXPLAIN
-        question = (
-            f"Let's do a short recap: in {request.topic}, focus on the core principle "
-            "first, then we can apply it to your problem."
-        )
-
-    return ProfessorTurnResponse(
-        assistant_response=question,
-        strategy=strategy,
-        revealed_final_answer=False,
-        next_action=ProfessorNextAction.CONTINUE,
-        citations=citations,
+    name: str = "professor_respond"
+    description: str = (
+        "Generate a tutoring response for one professor turn. "
+        "Uses strict JSON schema, avoids revealing final answers, and returns citations."
     )
 
+    professor_config: Any = None
+    citations_enabled: bool = True
+    socratic_default: bool = True
 
-def get_professor_json_schemas() -> dict[str, dict[str, Any]]:
-    """Expose JSON Schemas for transport contracts and UI/backend validation."""
-    return {
-        "ProfessorTurnRequest": ProfessorTurnRequest.model_json_schema(),
-        "ProfessorTurnResponse": ProfessorTurnResponse.model_json_schema(),
-    }
+    def __init__(self, config, **kwargs):
+        super().__init__(**kwargs)
+        self.professor_config = self._load_professor_runtime_config(config)
+        tutoring_cfg = self.professor_config.get("tutoring", {})
+        self.citations_enabled = bool(tutoring_cfg.get("citations_enabled", True))
+        self.socratic_default = bool(tutoring_cfg.get("socratic_default", True))
+
+    @staticmethod
+    def _load_professor_runtime_config(config) -> dict[str, Any]:
+        professor_config = config.get(PROFESSOR_CONFIG_PATH)
+
+        if not isinstance(professor_config, dict):
+            raise ValueError(
+                f"Missing or invalid config mapping at '{PROFESSOR_CONFIG_PATH}'"
+            )
+
+        llm_cfg = professor_config.get("llm")
+        tutoring_cfg = professor_config.get("tutoring")
+        if not isinstance(llm_cfg, dict):
+            raise ValueError("Missing or invalid config mapping at 'agents.professor.llm'")
+        if not isinstance(tutoring_cfg, dict):
+            raise ValueError("Missing or invalid config mapping at 'agents.professor.tutoring'")
+        if not llm_cfg.get("provider"):
+            raise ValueError("Missing required config key: 'agents.professor.llm.provider'")
+        if not llm_cfg.get("model_id"):
+            raise ValueError("Missing required config key: 'agents.professor.llm.model_id'")
+
+        return professor_config
+
+    @staticmethod
+    def sanitize_for_log(request: ProfessorTurnRequest) -> dict[str, Any]:
+        return {
+            "session_id": request.session_id,
+            "mode": request.mode.value,
+            "topic": request.topic,
+            "message_length": len(request.student_message),
+            "profile_level": request.profile.level,
+        }
+
+    @staticmethod
+    def get_professor_json_schemas() -> dict[str, dict[str, Any]]:
+        return {
+            "ProfessorTurnRequest": ProfessorTurnRequest.model_json_schema(),
+            "ProfessorTurnResponse": ProfessorTurnResponse.model_json_schema(),
+        }
+
+    def _retrieve_citations(self, request: ProfessorTurnRequest) -> list[Citation]:
+        if not self.citations_enabled:
+            return []
+
+        source_id = (
+            "local_stub_strict"
+            if request.mode is ProfessorMode.STRICT
+            else "local_stub_convenience"
+        )
+        return [
+            Citation(
+                source_id=source_id,
+                title=f"Intro to {request.topic}",
+                snippet=f"Core concept recap for {request.topic}.",
+                url=None,
+            )
+        ]
+
+    def _build_response(self, request: ProfessorTurnRequest) -> ProfessorTurnResponse:
+        citations = self._retrieve_citations(request)
+        if self.socratic_default:
+            strategy = ProfessorTurnStrategy.SOCRATIC_QUESTION
+            question = (
+                f"Before we solve it, can you explain in one sentence what the key idea in "
+                f"{request.topic} is?"
+            )
+        else:
+            strategy = ProfessorTurnStrategy.CONCEPT_EXPLAIN
+            question = (
+                f"Let's do a short recap: in {request.topic}, focus on the core principle "
+                "first, then we can apply it to your problem."
+            )
+
+        return ProfessorTurnResponse(
+            assistant_response=question,
+            strategy=strategy,
+            revealed_final_answer=False,
+            next_action=ProfessorNextAction.CONTINUE,
+            citations=citations,
+        )
+
+    def _run(self, tool_input: Union[str, dict]) -> str:
+        params = parse_tool_input(tool_input)
+        request = ProfessorTurnRequest.model_validate(params)
+        response = self._build_response(request)
+        return response.model_dump_json()
 
 
 # Rag Tools
@@ -343,5 +353,3 @@ class ListDocumentsTool(BaseTool):
 
         except Exception as e:
             return json.dumps({"error": str(e)})
-
-
