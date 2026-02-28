@@ -143,10 +143,18 @@ export function PracticePage() {
   if (authLoading) {
     return (
       <AppShell title="Practice Studio" subtitle="Checking your session...">
-        <section className="panel-card">
-          <div className="loading-state compact">
-            <div className="spinner" />
-            <span>Verifying session...</span>
+        <section className="panel-card session-skeleton" aria-label="Loading practice workspace">
+          <div className="skeleton-line skeleton-line-short" />
+          <div className="skeleton-line skeleton-line-medium" />
+          <div className="skeleton-pill-row">
+            <span className="skeleton-pill" />
+            <span className="skeleton-pill" />
+          </div>
+          <div className="skeleton-grid-4">
+            <span className="skeleton-block" />
+            <span className="skeleton-block" />
+            <span className="skeleton-block" />
+            <span className="skeleton-block" />
           </div>
         </section>
       </AppShell>
@@ -189,9 +197,13 @@ export function PracticePage() {
             </div>
 
             {loading && (
-              <div className="loading-state compact">
-                <div className="spinner" />
-                <span>Loading problems...</span>
+              <div className="catalog-skeleton" aria-label="Loading problems">
+                <div className="skeleton-line skeleton-line-medium" />
+                <div className="skeleton-grid-3">
+                  <span className="skeleton-block" />
+                  <span className="skeleton-block" />
+                  <span className="skeleton-block" />
+                </div>
               </div>
             )}
 

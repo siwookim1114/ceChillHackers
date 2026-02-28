@@ -113,10 +113,18 @@ export function HomePage() {
   if (authLoading) {
     return (
       <AppShell title="Dashboard" subtitle="Checking your session...">
-        <section className="panel-card">
-          <div className="loading-state compact">
-            <div className="spinner" />
-            <span>Verifying session...</span>
+        <section className="panel-card session-skeleton" aria-label="Loading dashboard">
+          <div className="skeleton-line skeleton-line-short" />
+          <div className="skeleton-line skeleton-line-medium" />
+          <div className="skeleton-pill-row">
+            <span className="skeleton-pill" />
+            <span className="skeleton-pill" />
+          </div>
+          <div className="skeleton-grid-4">
+            <span className="skeleton-block" />
+            <span className="skeleton-block" />
+            <span className="skeleton-block" />
+            <span className="skeleton-block" />
           </div>
         </section>
       </AppShell>
@@ -125,12 +133,13 @@ export function HomePage() {
 
   return (
     <AppShell
-      title="Dashboard"
-      subtitle={
-        user
-          ? `Welcome back, ${user.display_name}. Today is a great day to keep your streak alive.`
-          : "Welcome. Start a practice session and build your momentum."
+      title={
+        <span className="welcome-title">
+          <span>Welcome back, {user?.display_name ?? "Learner"}</span>
+          <span className="welcome-wave" aria-hidden="true">👋</span>
+        </span>
       }
+      subtitle="Today is a great day to keep your streak alive."
     >
       <div className="dashboard-clean">
         <section className="dashboard-hero reveal reveal-1">
