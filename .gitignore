@@ -1,7 +1,54 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.eggs/
+*.egg-info/
+pip-wheel-metadata/
+.venv/
+venv/
+env/
+
+# Node / frontend
 node_modules/
 frontend/node_modules/
+dist/
 frontend/dist/
-backend/.venv/
-__pycache__/
-.DS_Store
-.env
+build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vite/
+frontend/.vite/
+
+# Logs / temp
+*.log
+tmp/
+temp/
+
+# Local databases
+*.db
+*.sqlite3
