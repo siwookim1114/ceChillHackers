@@ -1,0 +1,34 @@
+aws:
+  region: us-east-1
+  top_k: 5  
+
+agents:
+  professor:
+    enabled: true
+    mode_default: strict
+    llm:
+      provider: bedrock_converse
+      model_id: anthropic.claude-sonnet-4-5-20250929-v1:0
+      temperature: 0.3
+      max_tokens: 800
+    runtime:
+      use_agentcore: false
+      agentcore_endpoint: ""
+      timeout_sec: 30
+      retries: 2
+      streaming: false
+    tutoring:
+      socratic_default: true
+      citations_enabled: true
+      reveal_final_answer: false
+
+bedrock:
+  knowledge_base_id: soon
+  data_source_id: soon
+  models:
+    rag: us.anthropic.claude-
+
+rag:
+  top_k: 5
+  chunk_size: 512
+  chunk_overlap: 64
