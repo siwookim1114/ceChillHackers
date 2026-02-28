@@ -31,7 +31,15 @@ export function listProblems() {
   return request<Problem[]>("/api/problems");
 }
 
-export function createAttempt(payload: { guest_id: string; problem_id: string }) {
+export type CreateAttemptPayload = {
+  guest_id: string;
+  problem_id?: string;
+  problem_text?: string;
+  answer_key?: string;
+  unit?: string;
+};
+
+export function createAttempt(payload: CreateAttemptPayload) {
   return request<AttemptCreateResponse>("/api/attempts", {
     method: "POST",
     body: JSON.stringify(payload)
