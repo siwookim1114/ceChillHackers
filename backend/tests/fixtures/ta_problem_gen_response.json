@@ -1,0 +1,70 @@
+{
+  "request_id": "gen-001",
+  "generated_for_profile": {
+    "level": "beginner",
+    "learning_style": "example_first",
+    "pace": "slow"
+  },
+  "problems": [
+    {
+      "problem_id": "gen-calc-001",
+      "statement": "Differentiate y = (3x^2 + 1)^4 and simplify the outer-inner structure only.",
+      "topic": "calculus",
+      "unit": "derivatives",
+      "difficulty": "easy",
+      "estimated_minutes": 8,
+      "solution_outline": [
+        "Identify outer function and inner function.",
+        "Differentiate outer with respect to inner.",
+        "Multiply by derivative of inner."
+      ],
+      "hint_ladder": [
+        "Name the outer function first.",
+        "Write d/dx[f(g(x))] as f'(g(x)) * g'(x).",
+        "Compute derivative of the inside polynomial."
+      ],
+      "easier_variant": "Differentiate y = (x^2 + 1)^3.",
+      "common_mistakes": [
+        {
+          "label": "Dropped inner derivative",
+          "reason": "Student differentiates only the outer power.",
+          "fix": "Explicitly multiply by derivative of inside function."
+        }
+      ],
+      "rubric_hooks": [
+        {
+          "criterion_id": "identify_outer_inner",
+          "description": "Correctly identifies outer and inner functions.",
+          "max_points": 2,
+          "error_tags": [
+            "CONCEPT_GAP"
+          ]
+        },
+        {
+          "criterion_id": "apply_chain_rule",
+          "description": "Applies chain rule structure correctly.",
+          "max_points": 3,
+          "error_tags": [
+            "PROCEDURE_SLIP"
+          ]
+        }
+      ],
+      "targets_error_tags": [
+        "CONCEPT_GAP",
+        "PROCEDURE_SLIP"
+      ]
+    }
+  ],
+  "adaptation_notes": [
+    "Started with low-to-medium complexity due to beginner + slow pace.",
+    "Used example-first structure with explicit procedural checkpoints."
+  ],
+  "citations": [
+    {
+      "source_id": "kb-lecture-derivatives-week3",
+      "title": "Calculus Week 3 Notes",
+      "snippet": "Chain rule: derivative of outer evaluated at inner times derivative of inner.",
+      "location": "p.12"
+    }
+  ]
+}

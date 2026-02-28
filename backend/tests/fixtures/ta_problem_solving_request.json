@@ -1,0 +1,75 @@
+{
+  "request_id": "solve-001",
+  "user_id": "user-123",
+  "attempt_id": "attempt-777",
+  "session_id": "session-abc",
+  "profile": {
+    "level": "beginner",
+    "learning_style": "example_first",
+    "pace": "slow"
+  },
+  "mode": "internal_only",
+  "problem_ref": {
+    "problem_id": "gen-calc-001",
+    "statement": "Differentiate y = (3x^2 + 1)^4.",
+    "topic": "calculus",
+    "unit": "derivatives"
+  },
+  "scan_parse": {
+    "problem_statement": "Differentiate y = (3x^2 + 1)^4.",
+    "steps": [
+      {
+        "step_index": 1,
+        "content": "I think this is chain rule with outer power 4 and inner 3x^2+1."
+      },
+      {
+        "step_index": 2,
+        "content": "Derivative is 4(3x^2+1)^3."
+      },
+      {
+        "step_index": 3,
+        "content": "Final answer: 4(3x^2+1)^3"
+      }
+    ],
+    "final_answer": "4(3x^2+1)^3",
+    "raw_parser_confidence": 0.92
+  },
+  "reference_solution_outline": [
+    "Identify outer and inner functions.",
+    "Apply chain rule form f'(g(x))*g'(x).",
+    "Compute derivative of inner term 3x^2+1 as 6x and multiply."
+  ],
+  "rubric": [
+    {
+      "criterion_id": "identify_outer_inner",
+      "description": "Correctly identifies outer and inner functions.",
+      "max_points": 2,
+      "error_tags": [
+        "CONCEPT_GAP"
+      ]
+    },
+    {
+      "criterion_id": "apply_chain_rule",
+      "description": "Applies chain rule and includes inner derivative.",
+      "max_points": 5,
+      "error_tags": [
+        "PROCEDURE_SLIP"
+      ]
+    },
+    {
+      "criterion_id": "final_simplification",
+      "description": "Presents correct final expression.",
+      "max_points": 3,
+      "error_tags": [
+        "CALCULATION_ERROR"
+      ]
+    }
+  ],
+  "stuck_signals": {
+    "idle_ms": 18000,
+    "erase_count_delta": 2,
+    "repeated_error_count": 1,
+    "stuck_score": 31
+  },
+  "language": "en"
+}

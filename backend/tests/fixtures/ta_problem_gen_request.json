@@ -1,0 +1,46 @@
+{
+  "request_id": "gen-001",
+  "user_id": "user-123",
+  "session_id": "session-abc",
+  "topic": "calculus",
+  "unit": "derivatives",
+  "subtopic": "chain-rule",
+  "profile": {
+    "level": "beginner",
+    "learning_style": "example_first",
+    "pace": "slow"
+  },
+  "mode": "mixed",
+  "mastery": [
+    {
+      "concept_id": "derivative_definition",
+      "mastery_score": 0.42,
+      "confidence": 0.81
+    },
+    {
+      "concept_id": "chain_rule",
+      "mastery_score": 0.33,
+      "confidence": 0.74
+    }
+  ],
+  "recent_error_tags": [
+    "CONCEPT_GAP",
+    "PROCEDURE_SLIP"
+  ],
+  "stuck_signals": {
+    "idle_ms": 42000,
+    "erase_count_delta": 5,
+    "repeated_error_count": 2,
+    "stuck_score": 58
+  },
+  "desired_difficulty_curve": {
+    "current": "easy",
+    "target": "medium",
+    "shape": "adaptive"
+  },
+  "time_budget_min": 45,
+  "num_problems": 3,
+  "include_solution_outline": true,
+  "include_rubric_hooks": true,
+  "language": "en"
+}
