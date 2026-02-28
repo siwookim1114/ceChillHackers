@@ -1,0 +1,21 @@
+# Front End
+
+
+
+
+# Back End
+
+
+
+
+# Agents
+bedrock-agentcore
+bedrock-agentcore-starter-toolkit
+langgraph
+langchain
+langchain-aws
+langchain-core
+boto3
+elevenlabs
+pydantic
+python-dotenv
