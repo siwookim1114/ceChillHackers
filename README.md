@@ -29,6 +29,20 @@ Hackathon MVP for a personalized AI teacher.
 - `backend/prompts/user_prompt_template.txt`: per-request user prompt template
 - `frontend/`: React + Vite client with route-based pages
 
+## PostgreSQL (Docker, minimal)
+
+```bash
+cp .env.example .env
+docker compose up -d db
+docker compose ps
+```
+
+Connection check:
+
+```bash
+psql "postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@localhost:5432/<POSTGRES_DB>" -c "select 1;"
+```
+
 ## Run locally
 
 ### Backend
