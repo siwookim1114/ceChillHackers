@@ -17,10 +17,19 @@ import type {
   LearningStyle,
   Problem,
   Summary,
-  UserRole
+  UserRole,
 } from "./types";
 
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 function parseErrorText(raw: string): string {
   if (!raw) {
@@ -50,12 +59,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   const response = await fetch(`${API_URL}${path}`, {
     headers,
-    ...options
+    ...options,
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(parseErrorText(text) || `HTTP ${response.status}`);
+    throw new ApiError(
+      parseErrorText(text) || `HTTP ${response.status}`,
+      response.status,
+    );
   }
 
   return (await response.json()) as T;
@@ -106,14 +118,14 @@ export type CreateLecturePayload = {
 export function signup(payload: SignupPayload) {
   return request<AuthResponse>("/api/auth/signup", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 }
 
 export function login(payload: LoginPayload) {
   return request<AuthResponse>("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 }
 
@@ -124,8 +136,8 @@ export function getMe() {
 export function getMeWithToken(accessToken: string) {
   return request<AuthUser>("/api/auth/me", {
     headers: {
-      Authorization: `Bearer ${accessToken}`
-    }
+      Authorization: `Bearer ${accessToken}`,
+    },
   });
 }
 
@@ -141,7 +153,7 @@ export function listCourses() {
 export function createCourse(payload: CreateCoursePayload) {
   return request<CourseFolder>("/api/courses", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 }
 
@@ -156,21 +168,30 @@ export function listCourseLectures(courseId: string) {
 export function createLecture(courseId: string, payload: CreateLecturePayload) {
   return request<LectureItem>(`/api/courses/${courseId}/lectures`, {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 }
 
 export function listLectureFiles(courseId: string, lectureId: string) {
-  return request<LectureFileInfo[]>(`/api/courses/${courseId}/lectures/${lectureId}/files`);
+  return request<LectureFileInfo[]>(
+    `/api/courses/${courseId}/lectures/${lectureId}/files`,
+  );
 }
 
-export function uploadLectureFile(courseId: string, lectureId: string, file: File) {
+export function uploadLectureFile(
+  courseId: string,
+  lectureId: string,
+  file: File,
+) {
   const formData = new FormData();
   formData.append("file", file);
-  return request<LectureFileInfo>(`/api/courses/${courseId}/lectures/${lectureId}/files`, {
-    method: "POST",
-    body: formData
-  });
+  return request<LectureFileInfo>(
+    `/api/courses/${courseId}/lectures/${lectureId}/files`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
 }
 
 export function listProblems() {
@@ -180,7 +201,7 @@ export function listProblems() {
 export function createAttempt(payload: CreateAttemptPayload) {
   return request<AttemptCreateResponse>("/api/attempts", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 }
 
@@ -191,12 +212,14 @@ export function getAttempt(attemptId: string) {
 export function postEvents(attemptId: string, events: ClientEvent[]) {
   return request<EventBatchResponse>(`/api/attempts/${attemptId}/events`, {
     method: "POST",
-    body: JSON.stringify({ events })
+    body: JSON.stringify({ events }),
   });
 }
 
 export function getIntervention(attemptId: string) {
-  return request<Intervention | null>(`/api/attempts/${attemptId}/intervention`);
+  return request<Intervention | null>(
+    `/api/attempts/${attemptId}/intervention`,
+  );
 }
 
 export function getSummary(attemptId: string) {
@@ -210,6 +233,6 @@ export function getDailyProgress() {
 export function postDailyProgressEvent(payload: DailyProgressEventPayload) {
   return request<DailyProgress>("/api/progress/daily/events", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 }

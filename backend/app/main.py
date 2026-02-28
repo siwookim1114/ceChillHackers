@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,12 @@ except ImportError:
     psycopg_errors = None
     dict_row = None
     Json = None
+
+try:
+    import multipart  # type: ignore # noqa: F401
+    MULTIPART_AVAILABLE = True
+except ImportError:
+    MULTIPART_AVAILABLE = False
 
 
 # Load root-level .env as default runtime config.
@@ -71,6 +78,7 @@ GOOGLE_REDIRECT_URI = os.getenv(
 OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", "600"))
 GOOGLE_OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI)
 DB_READY = False
+_DB_INIT_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
@@ -859,18 +867,22 @@ def require_db_enabled() -> None:
         )
     if DB_READY:
         return
-    try:
-        init_db_schema()
-        init_auth_schema()
-        DB_READY = True
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Database is temporarily unavailable. Check DATABASE_URL, RDS public access, "
-                "security group inbound 5432, and SSL settings."
-            ),
-        ) from exc
+    with _DB_INIT_LOCK:
+        # Double-checked locking: another thread may have initialized while waiting.
+        if DB_READY:
+            return
+        try:
+            init_db_schema()
+            init_auth_schema()
+            DB_READY = True
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Database is temporarily unavailable. Check DATABASE_URL, RDS public access, "
+                    "security group inbound 5432, and SSL settings."
+                ),
+            ) from exc
 
 
 def normalize_email(email: str) -> str:
@@ -1871,7 +1883,9 @@ def on_startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "storage": "postgres" if DB_ENABLED else "memory"}
+    storage = "postgres" if DB_ENABLED else "memory"
+    db_status = "ready" if DB_READY else ("disabled" if not DB_ENABLED else "initializing")
+    return {"status": "ok", "storage": storage, "db": db_status}
 
 
 @app.post("/api/auth/signup", response_model=AuthResponse)
@@ -2057,28 +2071,45 @@ def list_lecture_files(
     return list_lecture_files_db(user.id, course_id, lecture_id)
 
 
-@app.post(
-    "/api/courses/{course_id}/lectures/{lecture_id}/files",
-    response_model=LectureFileInfo,
-    status_code=201,
-)
-async def upload_lecture_file(
-    course_id: str,
-    lecture_id: str,
-    file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-) -> LectureFileInfo:
-    require_db_enabled()
-    user = get_current_auth_user(authorization)
-    file_bytes = await file.read()
-    return upload_lecture_file_db(
-        user.id,
-        course_id,
-        lecture_id,
-        file.filename or "uploaded_file",
-        file.content_type,
-        file_bytes,
+if MULTIPART_AVAILABLE:
+    @app.post(
+        "/api/courses/{course_id}/lectures/{lecture_id}/files",
+        response_model=LectureFileInfo,
+        status_code=201,
     )
+    async def upload_lecture_file(
+        course_id: str,
+        lecture_id: str,
+        file: UploadFile = File(...),
+        authorization: Optional[str] = Header(None, alias="Authorization"),
+    ) -> LectureFileInfo:
+        require_db_enabled()
+        user = get_current_auth_user(authorization)
+        file_bytes = await file.read()
+        return upload_lecture_file_db(
+            user.id,
+            course_id,
+            lecture_id,
+            file.filename or "uploaded_file",
+            file.content_type,
+            file_bytes,
+        )
+else:
+    @app.post(
+        "/api/courses/{course_id}/lectures/{lecture_id}/files",
+        response_model=LectureFileInfo,
+        status_code=201,
+    )
+    def upload_lecture_file_unavailable(
+        course_id: str,
+        lecture_id: str,
+        authorization: Optional[str] = Header(None, alias="Authorization"),
+    ) -> LectureFileInfo:
+        _ = course_id, lecture_id, authorization
+        raise HTTPException(
+            status_code=503,
+            detail="File upload requires python-multipart. Install backend requirements.",
+        )
 
 
 @app.get("/api/problems", response_model=list[Problem])

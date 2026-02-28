@@ -1,9 +1,26 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createAttempt, getCourseDetail, getMe, listCourses, postDailyProgressEvent } from "../api";
-import { clearAuthSession, getAccessToken, getAuthUser, saveAuthSession } from "../auth";
+import {
+  ApiError,
+  createAttempt,
+  getCourseDetail,
+  getMe,
+  listCourses,
+  postDailyProgressEvent,
+} from "../api";
+import {
+  clearAuthSession,
+  getAccessToken,
+  getAuthUser,
+  saveAuthSession,
+} from "../auth";
 import { AppShell } from "../components/AppShell";
-import type { AuthUser, CourseDetail, CourseFolder, LectureItem } from "../types";
+import type {
+  AuthUser,
+  CourseDetail,
+  CourseFolder,
+  LectureItem,
+} from "../types";
 
 export function PracticePage() {
   const navigate = useNavigate();
@@ -12,11 +29,15 @@ export function PracticePage() {
 
   const [courses, setCourses] = useState<CourseFolder[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
-  const [selectedCourse, setSelectedCourse] = useState<CourseDetail | null>(null);
+  const [selectedCourse, setSelectedCourse] = useState<CourseDetail | null>(
+    null,
+  );
 
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [loadingLectures, setLoadingLectures] = useState(false);
-  const [launchingLectureId, setLaunchingLectureId] = useState<string | null>(null);
+  const [launchingLectureId, setLaunchingLectureId] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,9 +52,11 @@ export function PracticePage() {
         saveAuthSession(token, me);
         setUser(me);
       })
-      .catch(() => {
-        clearAuthSession();
-        navigate("/login", { replace: true });
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) {
+          clearAuthSession();
+          navigate("/login", { replace: true });
+        }
       })
       .finally(() => setAuthLoading(false));
   }, [navigate]);
@@ -50,7 +73,9 @@ export function PracticePage() {
         return nextCourses[0]?.id ?? null;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load course folders");
+      setError(
+        err instanceof Error ? err.message : "Failed to load course folders",
+      );
     } finally {
       setLoadingCourses(false);
     }
@@ -105,13 +130,13 @@ export function PracticePage() {
         guest_id: getActorId(),
         problem_text: lecture.problem_prompt,
         answer_key: lecture.answer_key,
-        unit: selectedCourse.title
+        unit: selectedCourse.title,
       });
 
       if (getAccessToken() && user) {
         postDailyProgressEvent({
           event_type: "set_current_topic",
-          topic: selectedCourse.title
+          topic: selectedCourse.title,
         }).catch(() => {
           // Keep solve flow uninterrupted when progress sync fails.
         });
@@ -119,7 +144,9 @@ export function PracticePage() {
 
       navigate(`/solve/${attempt.attempt_id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start lecture practice");
+      setError(
+        err instanceof Error ? err.message : "Failed to start lecture practice",
+      );
     } finally {
       setLaunchingLectureId(null);
     }
@@ -128,7 +155,10 @@ export function PracticePage() {
   if (authLoading) {
     return (
       <AppShell title="Practice Studio" subtitle="Checking your session...">
-        <section className="panel-card session-skeleton" aria-label="Loading practice workspace">
+        <section
+          className="panel-card session-skeleton"
+          aria-label="Loading practice workspace"
+        >
           <div className="skeleton-line skeleton-line-short" />
           <div className="skeleton-line skeleton-line-medium" />
           <div className="skeleton-pill-row">
@@ -147,15 +177,25 @@ export function PracticePage() {
   }
 
   return (
-    <AppShell title="Practice Studio" subtitle="Open a course folder and start practice from its lectures.">
+    <AppShell
+      title="Practice Studio"
+      subtitle="Open a course folder and start practice from its lectures."
+    >
       <div className="practice-page-wrap">
         <section className="practice-head-banner reveal reveal-1">
           <div>
             <p className="overline">Course Folders</p>
             <h3>Practice by lecture, inside each course</h3>
-            <p>Pick a folder on the left, then launch any lecture as a guided solving session.</p>
+            <p>
+              Pick a folder on the left, then launch any lecture as a guided
+              solving session.
+            </p>
           </div>
-          <button className="btn-primary" onClick={() => navigate("/create-course")} type="button">
+          <button
+            className="btn-primary"
+            onClick={() => navigate("/create-course")}
+            type="button"
+          >
             Create New Course
           </button>
         </section>
@@ -192,13 +232,19 @@ export function PracticePage() {
                   type="button"
                 >
                   <strong>{course.title}</strong>
-                  <small>{course.lecture_count} lectures • {course.file_count} files</small>
+                  <small>
+                    {course.lecture_count} lectures • {course.file_count} files
+                  </small>
                 </button>
               ))}
               {!loadingCourses && courses.length === 0 && (
                 <div className="empty-course-state compact">
                   <p>No course folders yet.</p>
-                  <button className="btn-muted" onClick={() => navigate("/create-course")} type="button">
+                  <button
+                    className="btn-muted"
+                    onClick={() => navigate("/create-course")}
+                    type="button"
+                  >
                     Create your first course
                   </button>
                 </div>
@@ -221,15 +267,23 @@ export function PracticePage() {
                   <p>{selectedCourse?.syllabus || "No syllabus yet."}</p>
                 </div>
 
-                {loadingLectures && <p className="muted">Loading lectures...</p>}
-                {!loadingLectures && selectedCourse && selectedCourse.lectures.length === 0 && (
-                  <div className="empty-course-state compact">
-                    <p>No lectures in this folder yet.</p>
-                    <button className="btn-muted" onClick={() => navigate("/create-course")} type="button">
-                      Add lectures in Create New Course
-                    </button>
-                  </div>
+                {loadingLectures && (
+                  <p className="muted">Loading lectures...</p>
                 )}
+                {!loadingLectures &&
+                  selectedCourse &&
+                  selectedCourse.lectures.length === 0 && (
+                    <div className="empty-course-state compact">
+                      <p>No lectures in this folder yet.</p>
+                      <button
+                        className="btn-muted"
+                        onClick={() => navigate("/create-course")}
+                        type="button"
+                      >
+                        Add lectures in Create New Course
+                      </button>
+                    </div>
+                  )}
 
                 <div className="lecture-practice-list">
                   {selectedCourse?.lectures.map((lecture) => (
@@ -239,7 +293,9 @@ export function PracticePage() {
                           <h4>{lecture.title}</h4>
                           <p>{lecture.description || "No description"}</p>
                         </div>
-                        <span className="unit-tag">{lecture.file_count} files</span>
+                        <span className="unit-tag">
+                          {lecture.file_count} files
+                        </span>
                       </div>
 
                       <p className="problem-prompt">{lecture.problem_prompt}</p>
@@ -250,7 +306,9 @@ export function PracticePage() {
                         onClick={() => startLecturePractice(lecture)}
                         type="button"
                       >
-                        {launchingLectureId === lecture.id ? "Starting..." : "Start This Lecture"}
+                        {launchingLectureId === lecture.id
+                          ? "Starting..."
+                          : "Start This Lecture"}
                       </button>
                     </article>
                   ))}

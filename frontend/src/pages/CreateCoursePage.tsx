@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  ApiError,
   createCourse,
   createLecture,
   getCourseDetail,
   getMe,
   listCourses,
-  uploadLectureFile
+  uploadLectureFile,
 } from "../api";
 import { clearAuthSession, getAccessToken, saveAuthSession } from "../auth";
 import { AppShell } from "../components/AppShell";
@@ -20,7 +21,9 @@ export function CreateCoursePage() {
 
   const [courses, setCourses] = useState<CourseFolder[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
-  const [selectedCourse, setSelectedCourse] = useState<CourseDetail | null>(null);
+  const [selectedCourse, setSelectedCourse] = useState<CourseDetail | null>(
+    null,
+  );
 
   const [courseTitle, setCourseTitle] = useState("");
   const [courseSyllabus, setCourseSyllabus] = useState("");
@@ -31,7 +34,9 @@ export function CreateCoursePage() {
   const [lecturePrompt, setLecturePrompt] = useState("");
   const [lectureAnswer, setLectureAnswer] = useState("");
   const [creatingLecture, setCreatingLecture] = useState(false);
-  const [uploadingLectureId, setUploadingLectureId] = useState<string | null>(null);
+  const [uploadingLectureId, setUploadingLectureId] = useState<string | null>(
+    null,
+  );
 
   const [error, setError] = useState<string | null>(null);
 
@@ -46,7 +51,11 @@ export function CreateCoursePage() {
       .then((me) => {
         saveAuthSession(token, me);
       })
-      .catch(() => {
+      .catch((err) => {
+        // Only log out on 401. Server errors (5xx) should not clear a valid session.
+        if (!(err instanceof ApiError && err.status === 401)) {
+          return;
+        }
         clearAuthSession();
         navigate("/login", { replace: true });
       })
@@ -66,7 +75,10 @@ export function CreateCoursePage() {
       }
 
       setSelectedCourseId((previous) => {
-        if (preferredCourseId && nextCourses.some((course) => course.id === preferredCourseId)) {
+        if (
+          preferredCourseId &&
+          nextCourses.some((course) => course.id === preferredCourseId)
+        ) {
           return preferredCourseId;
         }
         if (previous && nextCourses.some((course) => course.id === previous)) {
@@ -94,7 +106,9 @@ export function CreateCoursePage() {
       const detail = await getCourseDetail(courseId);
       setSelectedCourse(detail);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load course details");
+      setError(
+        err instanceof Error ? err.message : "Failed to load course details",
+      );
       setSelectedCourse(null);
     } finally {
       setLoadingDetail(false);
@@ -121,7 +135,7 @@ export function CreateCoursePage() {
     try {
       const created = await createCourse({
         title,
-        syllabus: courseSyllabus.trim() || undefined
+        syllabus: courseSyllabus.trim() || undefined,
       });
       setCourseTitle("");
       setCourseSyllabus("");
@@ -158,14 +172,17 @@ export function CreateCoursePage() {
         title: lectureTitle.trim(),
         description: lectureDescription.trim() || undefined,
         problem_prompt: lecturePrompt.trim(),
-        answer_key: lectureAnswer.trim()
+        answer_key: lectureAnswer.trim(),
       });
       setLectureTitle("");
       setLectureDescription("");
       setLecturePrompt("");
       setLectureAnswer("");
 
-      await Promise.all([loadCourses(selectedCourseId), loadCourseDetail(selectedCourseId)]);
+      await Promise.all([
+        loadCourses(selectedCourseId),
+        loadCourseDetail(selectedCourseId),
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create lecture");
     } finally {
@@ -173,7 +190,10 @@ export function CreateCoursePage() {
     }
   };
 
-  const handleUploadLectureFile = async (lectureId: string, file: File | null) => {
+  const handleUploadLectureFile = async (
+    lectureId: string,
+    file: File | null,
+  ) => {
     if (!selectedCourseId || !file) {
       return;
     }
@@ -181,7 +201,10 @@ export function CreateCoursePage() {
     setError(null);
     try {
       await uploadLectureFile(selectedCourseId, lectureId, file);
-      await Promise.all([loadCourses(selectedCourseId), loadCourseDetail(selectedCourseId)]);
+      await Promise.all([
+        loadCourses(selectedCourseId),
+        loadCourseDetail(selectedCourseId),
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to upload file");
     } finally {
@@ -192,7 +215,10 @@ export function CreateCoursePage() {
   if (authLoading) {
     return (
       <AppShell title="Create New Course" subtitle="Checking your session...">
-        <section className="panel-card session-skeleton" aria-label="Loading create course workspace">
+        <section
+          className="panel-card session-skeleton"
+          aria-label="Loading create course workspace"
+        >
           <div className="skeleton-line skeleton-line-short" />
           <div className="skeleton-line skeleton-line-medium" />
           <div className="skeleton-pill-row">
@@ -214,7 +240,10 @@ export function CreateCoursePage() {
           <div>
             <p className="overline">Course Workspace</p>
             <h3>Create folders and build lecture content</h3>
-            <p>Start with a course title and syllabus, then add lectures with prompts and files.</p>
+            <p>
+              Start with a course title and syllabus, then add lectures with
+              prompts and files.
+            </p>
           </div>
         </section>
 
@@ -246,14 +275,21 @@ export function CreateCoursePage() {
               />
             </label>
 
-            <button className="btn-primary" disabled={creatingCourse} onClick={handleCreateCourse} type="button">
+            <button
+              className="btn-primary"
+              disabled={creatingCourse}
+              onClick={handleCreateCourse}
+              type="button"
+            >
               {creatingCourse ? "Creating..." : "Create Course Folder"}
             </button>
 
             <div className="course-folder-list-wrap">
               <div className="builder-header compact">
                 <h4>Course Folders</h4>
-                <p>{loadingCourses ? "Loading..." : `${courses.length} total`}</p>
+                <p>
+                  {loadingCourses ? "Loading..." : `${courses.length} total`}
+                </p>
               </div>
 
               <div className="course-folder-list">
@@ -265,11 +301,16 @@ export function CreateCoursePage() {
                     type="button"
                   >
                     <strong>{course.title}</strong>
-                    <small>{course.lecture_count} lectures • {course.file_count} files</small>
+                    <small>
+                      {course.lecture_count} lectures • {course.file_count}{" "}
+                      files
+                    </small>
                   </button>
                 ))}
                 {!loadingCourses && courses.length === 0 && (
-                  <p className="muted">No folders yet. Create your first course folder.</p>
+                  <p className="muted">
+                    No folders yet. Create your first course folder.
+                  </p>
                 )}
               </div>
             </div>
@@ -279,7 +320,10 @@ export function CreateCoursePage() {
             {!selectedCourseId && (
               <div className="empty-course-state">
                 <h3>No course selected</h3>
-                <p>Create a course folder first, then lectures and files will appear here.</p>
+                <p>
+                  Create a course folder first, then lectures and files will
+                  appear here.
+                </p>
               </div>
             )}
 
@@ -303,7 +347,9 @@ export function CreateCoursePage() {
                   <label>
                     Description (Optional)
                     <input
-                      onChange={(event) => setLectureDescription(event.target.value)}
+                      onChange={(event) =>
+                        setLectureDescription(event.target.value)
+                      }
                       placeholder="Short summary for this lecture"
                       value={lectureDescription}
                     />
@@ -339,9 +385,13 @@ export function CreateCoursePage() {
                 </button>
 
                 <div className="lecture-card-list">
-                  {loadingDetail && <p className="muted">Loading lectures...</p>}
+                  {loadingDetail && (
+                    <p className="muted">Loading lectures...</p>
+                  )}
                   {!loadingDetail && selectedCourse?.lectures.length === 0 && (
-                    <p className="muted">No lectures yet. Add your first lecture above.</p>
+                    <p className="muted">
+                      No lectures yet. Add your first lecture above.
+                    </p>
                   )}
 
                   {selectedCourse?.lectures.map((lecture) => (
@@ -351,14 +401,21 @@ export function CreateCoursePage() {
                           <h4>{lecture.title}</h4>
                           <p>{lecture.description || "No description"}</p>
                         </div>
-                        <span className="unit-tag">{lecture.file_count} files</span>
+                        <span className="unit-tag">
+                          {lecture.file_count} files
+                        </span>
                       </div>
 
                       <p className="problem-prompt">{lecture.problem_prompt}</p>
 
                       <div className="lecture-upload-row">
-                        <label className="btn-muted file-upload-btn" htmlFor={`file-${lecture.id}`}>
-                          {uploadingLectureId === lecture.id ? "Uploading..." : "Upload Lecture File"}
+                        <label
+                          className="btn-muted file-upload-btn"
+                          htmlFor={`file-${lecture.id}`}
+                        >
+                          {uploadingLectureId === lecture.id
+                            ? "Uploading..."
+                            : "Upload Lecture File"}
                         </label>
                         <input
                           className="upload-input"
@@ -377,7 +434,13 @@ export function CreateCoursePage() {
                           {lecture.files.map((file) => (
                             <li key={file.id}>
                               <span>{file.file_name}</span>
-                              <small>{Math.max(1, Math.round(file.size_bytes / 1024))} KB</small>
+                              <small>
+                                {Math.max(
+                                  1,
+                                  Math.round(file.size_bytes / 1024),
+                                )}{" "}
+                                KB
+                              </small>
                             </li>
                           ))}
                         </ul>

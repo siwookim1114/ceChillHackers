@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getDailyProgress, getMe, listProblems } from "../api";
-import { clearAuthSession, getAccessToken, getAuthUser, saveAuthSession } from "../auth";
+import { ApiError, getDailyProgress, getMe, listProblems } from "../api";
+import {
+  clearAuthSession,
+  getAccessToken,
+  getAuthUser,
+  saveAuthSession,
+} from "../auth";
 import { AppShell } from "../components/AppShell";
 import type { AuthUser } from "../types";
 import { getDailyProgressSnapshot } from "../utils/dailyProgress";
@@ -19,7 +24,7 @@ const DEFAULT_PROGRESS_STATE: DashboardProgressState = {
   createdCourses: 0,
   coachedSessions: 0,
   dailyTargetSessions: 2,
-  currentCourseTopic: null
+  currentCourseTopic: null,
 };
 
 function readLocalProgress(): DashboardProgressState {
@@ -29,7 +34,7 @@ function readLocalProgress(): DashboardProgressState {
     createdCourses: snapshot.createdCourses,
     coachedSessions: snapshot.coachedSessions,
     dailyTargetSessions: 2,
-    currentCourseTopic: localStorage.getItem("current_course_topic")
+    currentCourseTopic: localStorage.getItem("current_course_topic"),
   };
 }
 
@@ -45,7 +50,7 @@ function toProgressState(payload: {
     createdCourses: payload.created_courses,
     coachedSessions: payload.coached_sessions,
     dailyTargetSessions: payload.daily_target_sessions,
-    currentCourseTopic: payload.current_course_topic
+    currentCourseTopic: payload.current_course_topic,
   };
 }
 
@@ -54,7 +59,9 @@ export function HomePage() {
   const [user, setUser] = useState<AuthUser | null>(() => getAuthUser());
   const [authLoading, setAuthLoading] = useState(true);
   const [problemCount, setProblemCount] = useState(0);
-  const [dailyProgress, setDailyProgress] = useState<DashboardProgressState>(DEFAULT_PROGRESS_STATE);
+  const [dailyProgress, setDailyProgress] = useState<DashboardProgressState>(
+    DEFAULT_PROGRESS_STATE,
+  );
 
   const level = localStorage.getItem("preferred_level") ?? "Beginner";
   const style = localStorage.getItem("preferred_style") ?? "Socratic";
@@ -71,9 +78,13 @@ export function HomePage() {
         saveAuthSession(token, me);
         setUser(me);
       })
-      .catch(() => {
-        clearAuthSession();
-        navigate("/login", { replace: true });
+      .catch((err) => {
+        // Only log out on 401 (token invalid/expired). Server errors (5xx) should
+        // not clear a valid session — the user would be stuck in a login loop.
+        if (err instanceof ApiError && err.status === 401) {
+          clearAuthSession();
+          navigate("/login", { replace: true });
+        }
       })
       .finally(() => setAuthLoading(false));
   }, [navigate]);
@@ -105,7 +116,10 @@ export function HomePage() {
   const trackGoal = Math.max(3, Math.min(6, problemCount || 3));
   const trackProgress = Math.min(trackGoal, solvedSessions);
   const trackPercent = Math.round((trackProgress / trackGoal) * 100);
-  const missionDoneCount = Number(solvedSessions >= dailyTarget) + Number(createdCourses >= 1) + Number(coachedSessions >= 1);
+  const missionDoneCount =
+    Number(solvedSessions >= dailyTarget) +
+    Number(createdCourses >= 1) +
+    Number(coachedSessions >= 1);
   const missionPercent = Math.round((missionDoneCount / 3) * 100);
 
   const weeklyBars = [35, 62, 48, 71, 58, 84, Math.max(22, trackPercent)];
@@ -113,7 +127,10 @@ export function HomePage() {
   if (authLoading) {
     return (
       <AppShell title="Dashboard" subtitle="Checking your session...">
-        <section className="panel-card session-skeleton" aria-label="Loading dashboard">
+        <section
+          className="panel-card session-skeleton"
+          aria-label="Loading dashboard"
+        >
           <div className="skeleton-line skeleton-line-short" />
           <div className="skeleton-line skeleton-line-medium" />
           <div className="skeleton-pill-row">
@@ -136,7 +153,9 @@ export function HomePage() {
       title={
         <span className="welcome-title">
           <span>Welcome back, {user?.display_name ?? "Learner"}</span>
-          <span className="welcome-wave" aria-hidden="true">👋</span>
+          <span className="welcome-wave" aria-hidden="true">
+            👋
+          </span>
         </span>
       }
       subtitle="Today is a great day to keep your streak alive."
@@ -147,14 +166,22 @@ export function HomePage() {
             <p className="overline">Today&apos;s Focus</p>
             <h3>{currentTrack}</h3>
             <p>
-              You are at <strong>{trackPercent}%</strong> of today&apos;s track. Keep the flow with
-              one focused session.
+              You are at <strong>{trackPercent}%</strong> of today&apos;s track.
+              Keep the flow with one focused session.
             </p>
             <div className="hero-cta-row">
-              <button className="btn-primary" onClick={() => navigate("/practice")} type="button">
+              <button
+                className="btn-primary"
+                onClick={() => navigate("/practice")}
+                type="button"
+              >
                 Open Practice Studio
               </button>
-              <button className="btn-muted" onClick={() => navigate("/planner")} type="button">
+              <button
+                className="btn-muted"
+                onClick={() => navigate("/planner")}
+                type="button"
+              >
                 View Study Planner
               </button>
             </div>
@@ -204,10 +231,14 @@ export function HomePage() {
               <span>{trackPercent}%</span>
             </div>
             <div className="progress-bar-track">
-              <div className="progress-bar-fill" style={{ width: `${trackPercent}%` }} />
+              <div
+                className="progress-bar-fill"
+                style={{ width: `${trackPercent}%` }}
+              />
             </div>
             <p className="journey-copy">
-              {trackProgress}/{trackGoal} sessions completed on today&apos;s route.
+              {trackProgress}/{trackGoal} sessions completed on today&apos;s
+              route.
             </p>
             <div className="mini-graph">
               {weeklyBars.map((value, index) => (
@@ -239,18 +270,14 @@ export function HomePage() {
                 <span className="task-check" aria-hidden="true" />
                 <div>
                   <strong>Create 1 custom course</strong>
-                  <small>
-                    {createdCourses}/1
-                  </small>
+                  <small>{createdCourses}/1</small>
                 </div>
               </li>
               <li className={coachedSessions >= 1 ? "done" : ""}>
                 <span className="task-check" aria-hidden="true" />
                 <div>
                   <strong>Use AI coach at least once</strong>
-                  <small>
-                    {coachedSessions}/1
-                  </small>
+                  <small>{coachedSessions}/1</small>
                 </div>
               </li>
             </ul>
@@ -258,15 +285,29 @@ export function HomePage() {
         </section>
 
         <section className="dashboard-links-grid reveal reveal-4">
-          <button className="panel-card dashboard-link-card" onClick={() => navigate("/practice")} type="button">
+          <button
+            className="panel-card dashboard-link-card"
+            onClick={() => navigate("/practice")}
+            type="button"
+          >
             <h4>Practice Studio</h4>
-            <p>Start problem solving, submit answers, and get hint intervention.</p>
+            <p>
+              Start problem solving, submit answers, and get hint intervention.
+            </p>
           </button>
-          <button className="panel-card dashboard-link-card" onClick={() => navigate("/progress")} type="button">
+          <button
+            className="panel-card dashboard-link-card"
+            onClick={() => navigate("/progress")}
+            type="button"
+          >
             <h4>Progress Analytics</h4>
             <p>Check momentum, stuck score trend, and hint-level patterns.</p>
           </button>
-          <button className="panel-card dashboard-link-card" onClick={() => navigate("/library")} type="button">
+          <button
+            className="panel-card dashboard-link-card"
+            onClick={() => navigate("/library")}
+            type="button"
+          >
             <h4>Learning Library</h4>
             <p>Collect notes, unit guides, and resources by subject.</p>
           </button>
