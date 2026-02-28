@@ -1,0 +1,11 @@
+{
+  "session_id": "sess_001",
+  "message": "I keep mixing up limit laws. Can you guide me?",
+  "topic": "calculus_limits",
+  "mode": "strict",
+  "profile": {
+    "level": "beginner",
+    "learning_style": "example_first",
+    "pace": "medium"
+  }
+}
