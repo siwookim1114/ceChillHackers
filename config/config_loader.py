@@ -47,5 +47,6 @@ def load_config(config_path: str = None) -> Config:
 
     with open(config_path, "r") as f:
         config_dict = yaml.safe_load(f)
-
     return Config(config_dict)
+
+config = load_config()
