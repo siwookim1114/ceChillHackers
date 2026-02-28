@@ -11,12 +11,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
+from urllib import error as urllib_error, request as urllib_request
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 try:
@@ -59,6 +61,14 @@ DATABASE_URL = normalize_database_url(DATABASE_URL)
 DB_ENABLED = bool(DATABASE_URL) and "<DB_PASSWORD>" not in DATABASE_URL
 APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "dev-only-change-me-please")
 ACCESS_TOKEN_TTL_SEC = int(os.getenv("ACCESS_TOKEN_TTL_SEC", "604800"))
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").strip()
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+GOOGLE_REDIRECT_URI = os.getenv(
+    "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback"
+).strip()
+OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", "600"))
+GOOGLE_OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI)
 
 
 def utcnow() -> datetime:
@@ -178,6 +188,140 @@ def parse_bearer_token(authorization: Optional[str]) -> str:
     return authorization.removeprefix("Bearer ").strip()
 
 
+def frontend_login_url() -> str:
+    return f"{FRONTEND_URL.rstrip('/')}/login"
+
+
+def normalize_return_to(return_to: Optional[str]) -> str:
+    default_url = frontend_login_url()
+    if not return_to:
+        return default_url
+
+    cleaned = return_to.strip()
+    if not cleaned:
+        return default_url
+    if cleaned.startswith("/"):
+        return f"{FRONTEND_URL.rstrip('/')}{cleaned}"
+
+    front_parts = urlsplit(FRONTEND_URL)
+    target_parts = urlsplit(cleaned)
+    if (
+        target_parts.scheme in {"http", "https"}
+        and target_parts.netloc
+        and target_parts.netloc == front_parts.netloc
+    ):
+        return cleaned
+    return default_url
+
+
+def append_fragment_params(url: str, params: dict[str, str]) -> str:
+    parts = urlsplit(url)
+    fragment_map = dict(parse_qsl(parts.fragment))
+    fragment_map.update({k: v for k, v in params.items() if v})
+    fragment = urlencode(fragment_map)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, fragment))
+
+
+def create_oauth_state(return_to: str) -> str:
+    payload = {
+        "return_to": return_to,
+        "exp": int(time.time()) + OAUTH_STATE_TTL_SEC,
+        "nonce": secrets.token_urlsafe(12),
+    }
+    payload_b64 = b64url_encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    )
+    signature = hmac.new(
+        APP_SECRET_KEY.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256
+    ).digest()
+    return f"{payload_b64}.{b64url_encode(signature)}"
+
+
+def decode_oauth_state(state: str) -> dict[str, Any]:
+    try:
+        payload_b64, signature_b64 = state.split(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state") from exc
+
+    expected_signature = hmac.new(
+        APP_SECRET_KEY.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256
+    ).digest()
+    provided_signature = b64url_decode(signature_b64)
+    if not hmac.compare_digest(expected_signature, provided_signature):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state signature")
+
+    payload = json.loads(b64url_decode(payload_b64))
+    if int(payload.get("exp", 0)) < int(time.time()):
+        raise HTTPException(status_code=400, detail="OAuth state expired")
+    return payload
+
+
+def require_google_oauth_enabled() -> None:
+    if not GOOGLE_OAUTH_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Google login is not configured. Set GOOGLE_CLIENT_ID, "
+                "GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI."
+            ),
+        )
+
+
+def build_google_authorize_url(state: str) -> str:
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "prompt": "select_account",
+        "access_type": "offline",
+        "state": state,
+    }
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+
+
+def exchange_google_code(code: str) -> dict[str, Any]:
+    payload = urlencode(
+        {
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        }
+    ).encode("utf-8")
+    request = urllib_request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=400, detail=f"Google token exchange failed: {body}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Google token exchange failed") from exc
+
+
+def fetch_google_userinfo(access_token: str) -> dict[str, Any]:
+    request = urllib_request.Request(
+        "https://openidconnect.googleapis.com/v1/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+        method="GET",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=400, detail=f"Google userinfo failed: {body}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Google userinfo request failed") from exc
+
+
 class Problem(BaseModel):
     id: str
     title: str
@@ -234,6 +378,29 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: AuthUser
+
+
+DailyProgressEventType = Literal[
+    "session_solved",
+    "course_created",
+    "coached_session",
+    "set_current_topic",
+]
+
+
+class DailyProgress(BaseModel):
+    date: str
+    solved_sessions: int
+    created_courses: int
+    coached_sessions: int
+    daily_target_sessions: int
+    current_course_topic: Optional[str] = None
+
+
+class DailyProgressEventRequest(BaseModel):
+    event_type: DailyProgressEventType
+    attempt_id: Optional[str] = None
+    topic: Optional[str] = None
 
 
 EventType = Literal[
@@ -539,6 +706,32 @@ CREATE TABLE IF NOT EXISTS student_profiles (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS user_daily_progress (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  progress_date DATE NOT NULL,
+  solved_sessions INT NOT NULL DEFAULT 0,
+  created_courses INT NOT NULL DEFAULT 0,
+  coached_sessions INT NOT NULL DEFAULT 0,
+  daily_target_sessions INT NOT NULL DEFAULT 2,
+  current_course_topic TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, progress_date)
+);
+
+CREATE TABLE IF NOT EXISTS user_daily_progress_events (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  progress_date DATE NOT NULL,
+  event_type TEXT NOT NULL,
+  attempt_id TEXT NOT NULL DEFAULT '',
+  topic TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_daily_progress_events_dedup
+  ON user_daily_progress_events(user_id, progress_date, event_type, attempt_id);
 """
 
 
@@ -611,6 +804,81 @@ def get_user_by_id_db(user_id: str) -> Optional[AuthUser]:
             if not row:
                 return None
             return auth_user_from_row(row)
+
+
+def get_user_by_email_db(email: str) -> Optional[AuthUser]:
+    normalized = normalize_email(email)
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  u.id::text AS id,
+                  u.email,
+                  u.display_name,
+                  u.role::text AS role,
+                  sp.learning_style::text AS learning_style,
+                  sp.learning_pace::text AS learning_pace,
+                  sp.target_goal
+                FROM users u
+                LEFT JOIN student_profiles sp ON sp.user_id = u.id
+                WHERE lower(u.email) = %s AND u.is_active = TRUE
+                LIMIT 1
+                """,
+                (normalized,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return auth_user_from_row(row)
+
+
+def find_or_create_google_user_db(email: str, display_name: str) -> AuthUser:
+    normalized = normalize_email(email)
+    existing = get_user_by_email_db(normalized)
+    if existing:
+        return existing
+
+    user_id: Optional[str] = None
+    random_password_hash = hash_password(secrets.token_urlsafe(32))
+    safe_name = display_name.strip() or normalized.split("@")[0] or "Student"
+
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (email, password_hash, role, display_name)
+                    VALUES (%s, %s, 'student'::user_role, %s)
+                    RETURNING id::text AS id
+                    """,
+                    (normalized, random_password_hash, safe_name),
+                )
+                inserted = cur.fetchone()
+                user_id = inserted["id"] if inserted else None
+
+                if user_id:
+                    cur.execute(
+                        """
+                        INSERT INTO student_profiles (user_id, learning_style, learning_pace)
+                        VALUES (%s::uuid, 'question'::learning_style, 'normal'::learning_pace)
+                        ON CONFLICT (user_id) DO NOTHING
+                        """,
+                        (user_id,),
+                    )
+            conn.commit()
+    except Exception as exc:
+        if psycopg_errors and isinstance(exc, psycopg_errors.UniqueViolation):
+            winner = get_user_by_email_db(normalized)
+            if winner:
+                return winner
+        raise
+
+    if user_id:
+        created = get_user_by_id_db(user_id)
+        if created:
+            return created
+    raise HTTPException(status_code=500, detail="Failed to create Google user")
 
 
 def signup_db(payload: SignupRequest) -> AuthResponse:
@@ -700,6 +968,161 @@ def login_db(payload: LoginRequest) -> AuthResponse:
     user = auth_user_from_row(row)
     token = create_access_token(user.id, user.email, user.role)
     return AuthResponse(access_token=token, user=user)
+
+
+def today_utc_date() -> str:
+    return utcnow().date().isoformat()
+
+
+def daily_progress_from_row(row: dict[str, Any]) -> DailyProgress:
+    progress_date = row["progress_date"]
+    date_text = (
+        progress_date.isoformat()
+        if hasattr(progress_date, "isoformat")
+        else str(progress_date)
+    )
+    return DailyProgress(
+        date=date_text,
+        solved_sessions=int(row["solved_sessions"] or 0),
+        created_courses=int(row["created_courses"] or 0),
+        coached_sessions=int(row["coached_sessions"] or 0),
+        daily_target_sessions=int(row["daily_target_sessions"] or 2),
+        current_course_topic=row.get("current_course_topic"),
+    )
+
+
+def get_daily_progress_db(user_id: str) -> DailyProgress:
+    progress_date = today_utc_date()
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_daily_progress (user_id, progress_date)
+                VALUES (%s::uuid, %s::date)
+                ON CONFLICT (user_id, progress_date) DO NOTHING
+                """,
+                (user_id, progress_date),
+            )
+            cur.execute(
+                """
+                SELECT
+                  progress_date,
+                  solved_sessions,
+                  created_courses,
+                  coached_sessions,
+                  daily_target_sessions,
+                  current_course_topic
+                FROM user_daily_progress
+                WHERE user_id = %s::uuid AND progress_date = %s::date
+                """,
+                (user_id, progress_date),
+            )
+            row = cur.fetchone()
+        conn.commit()
+
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to load daily progress")
+    return daily_progress_from_row(row)
+
+
+def record_daily_progress_event_db(
+    user_id: str, payload: DailyProgressEventRequest
+) -> DailyProgress:
+    progress_date = today_utc_date()
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_daily_progress (user_id, progress_date)
+                VALUES (%s::uuid, %s::date)
+                ON CONFLICT (user_id, progress_date) DO NOTHING
+                """,
+                (user_id, progress_date),
+            )
+
+            cleaned_topic = (payload.topic or "").strip() or None
+            if payload.event_type == "set_current_topic":
+                if cleaned_topic:
+                    cur.execute(
+                        """
+                        UPDATE user_daily_progress
+                        SET current_course_topic = %s, updated_at = now()
+                        WHERE user_id = %s::uuid AND progress_date = %s::date
+                        """,
+                        (cleaned_topic, user_id, progress_date),
+                    )
+            else:
+                attempt_id = (payload.attempt_id or "").strip()
+                if not attempt_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="attempt_id is required for this event type",
+                    )
+
+                cur.execute(
+                    """
+                    INSERT INTO user_daily_progress_events (
+                      user_id, progress_date, event_type, attempt_id, topic
+                    ) VALUES (%s::uuid, %s::date, %s, %s, %s)
+                    ON CONFLICT (user_id, progress_date, event_type, attempt_id)
+                    DO NOTHING
+                    RETURNING id
+                    """,
+                    (user_id, progress_date, payload.event_type, attempt_id, cleaned_topic),
+                )
+                inserted = cur.fetchone()
+                if inserted:
+                    if payload.event_type == "session_solved":
+                        cur.execute(
+                            """
+                            UPDATE user_daily_progress
+                            SET solved_sessions = solved_sessions + 1, updated_at = now()
+                            WHERE user_id = %s::uuid AND progress_date = %s::date
+                            """,
+                            (user_id, progress_date),
+                        )
+                    elif payload.event_type == "course_created":
+                        cur.execute(
+                            """
+                            UPDATE user_daily_progress
+                            SET
+                              created_courses = created_courses + 1,
+                              current_course_topic = COALESCE(%s, current_course_topic),
+                              updated_at = now()
+                            WHERE user_id = %s::uuid AND progress_date = %s::date
+                            """,
+                            (cleaned_topic, user_id, progress_date),
+                        )
+                    elif payload.event_type == "coached_session":
+                        cur.execute(
+                            """
+                            UPDATE user_daily_progress
+                            SET coached_sessions = coached_sessions + 1, updated_at = now()
+                            WHERE user_id = %s::uuid AND progress_date = %s::date
+                            """,
+                            (user_id, progress_date),
+                        )
+
+            cur.execute(
+                """
+                SELECT
+                  progress_date,
+                  solved_sessions,
+                  created_courses,
+                  coached_sessions,
+                  daily_target_sessions,
+                  current_course_topic
+                FROM user_daily_progress
+                WHERE user_id = %s::uuid AND progress_date = %s::date
+                """,
+                (user_id, progress_date),
+            )
+            row = cur.fetchone()
+        conn.commit()
+
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to update daily progress")
+    return daily_progress_from_row(row)
 
 
 def load_attempt_state_db(attempt_id: str) -> AttemptState | None:
@@ -1037,6 +1460,105 @@ def get_me(authorization: Optional[str] = Header(None, alias="Authorization")) -
     if not user:
         raise HTTPException(status_code=401, detail="User not found or inactive")
     return user
+
+
+def get_current_auth_user(authorization: Optional[str]) -> AuthUser:
+    token = parse_bearer_token(authorization)
+    payload = decode_access_token(token)
+    user = get_user_by_id_db(str(payload["sub"]))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    return user
+
+
+@app.get("/api/progress/daily", response_model=DailyProgress)
+def get_daily_progress(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> DailyProgress:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    return get_daily_progress_db(user.id)
+
+
+@app.post("/api/progress/daily/events", response_model=DailyProgress)
+def post_daily_progress_event(
+    payload: DailyProgressEventRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> DailyProgress:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    return record_daily_progress_event_db(user.id, payload)
+
+
+@app.get("/api/auth/google/start")
+def google_auth_start(return_to: Optional[str] = Query(None)) -> RedirectResponse:
+    require_db_enabled()
+    require_google_oauth_enabled()
+    target = normalize_return_to(return_to)
+    state = create_oauth_state(target)
+    auth_url = build_google_authorize_url(state)
+    return RedirectResponse(url=auth_url, status_code=302)
+
+
+@app.get("/api/auth/google/callback")
+def google_auth_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+) -> RedirectResponse:
+    require_db_enabled()
+    require_google_oauth_enabled()
+
+    fallback_return_to = frontend_login_url()
+    if state:
+        try:
+            decoded_state = decode_oauth_state(state)
+            fallback_return_to = normalize_return_to(decoded_state.get("return_to"))
+        except HTTPException:
+            pass
+
+    if error:
+        return RedirectResponse(
+            url=append_fragment_params(
+                fallback_return_to, {"oauth_error": f"google_error_{error}"}
+            ),
+            status_code=302,
+        )
+
+    if not code or not state:
+        return RedirectResponse(
+            url=append_fragment_params(
+                fallback_return_to, {"oauth_error": "google_missing_code_or_state"}
+            ),
+            status_code=302,
+        )
+
+    try:
+        decoded_state = decode_oauth_state(state)
+        return_to = normalize_return_to(decoded_state.get("return_to"))
+        token_payload = exchange_google_code(code)
+        provider_access_token = str(token_payload.get("access_token") or "").strip()
+        if not provider_access_token:
+            raise HTTPException(status_code=400, detail="Missing Google access token")
+
+        profile = fetch_google_userinfo(provider_access_token)
+        email = normalize_email(str(profile.get("email") or ""))
+        is_verified = bool(profile.get("email_verified"))
+        if not email or not is_verified:
+            raise HTTPException(status_code=400, detail="Google email is missing or not verified")
+
+        display_name = str(profile.get("name") or email.split("@")[0]).strip() or "Student"
+        user = find_or_create_google_user_db(email, display_name)
+        token = create_access_token(user.id, user.email, user.role)
+        success_url = append_fragment_params(
+            return_to, {"access_token": token, "oauth_provider": "google"}
+        )
+        return RedirectResponse(url=success_url, status_code=302)
+    except Exception:
+        return RedirectResponse(
+            url=append_fragment_params(fallback_return_to, {"oauth_error": "google_login_failed"}),
+            status_code=302,
+        )
 
 
 @app.get("/api/problems", response_model=list[Problem])

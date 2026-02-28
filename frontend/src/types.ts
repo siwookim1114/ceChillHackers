@@ -87,3 +87,18 @@ export type AuthResponse = {
   token_type: "bearer";
   user: AuthUser;
 };
+
+export type DailyProgress = {
+  date: string;
+  solved_sessions: number;
+  created_courses: number;
+  coached_sessions: number;
+  daily_target_sessions: number;
+  current_course_topic: string | null;
+};
+
+export type DailyProgressEventType =
+  | "session_solved"
+  | "course_created"
+  | "coached_session"
+  | "set_current_topic";

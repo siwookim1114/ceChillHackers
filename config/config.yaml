@@ -1,16 +1,36 @@
 aws:
   region: us-east-1
-  top_k: 5  
+  s3_bucket: cechillhacker-filebucket
+
+llm:
+  provider: featherless  # featherless | bedrock_converse
+  model: Qwen/Qwen2.5-32B-Instruct
+  base_url: https://api.featherless.ai/v1
+
+bedrock:
+  knowledge_base_id: 5JVQ6VMS2R
+  data_source_id: Q0XAWXD3IE
+
+rag:
+  top_k: 10
+  embedding_model: all-MiniLM-L6-v2
+  chunk_size: 1000
+  chunk_overlap: 200
+  s3_docs_prefix: docs/
+  cache_dir: /tmp/cechillhackers_cache
+  relevance_threshold: 0.15
+
+exa:
+  num_results: 5
+  search_type: auto
+  category: research paper
+  max_text_chars: 2000
+  max_highlight_chars: 500
 
 agents:
   professor:
     enabled: true
-    mode_default: strict
-    llm:
-      provider: featherless
-      model_id: Qwen/Qwen2.5-7B-Instruct
-      temperature: 0.1
-      max_tokens: 800
+    mode_default: strict   
     runtime:
       use_live_featherless: true
       timeout_sec: 30
@@ -22,20 +42,6 @@ agents:
       citations_enabled: true
       reveal_final_answer: false
 
-providers:
-  featherless:
-    base_url: https://api.featherless.ai/v1
-    api_key_env: FEATHERLESS_API_KEY
-    timeout_sec: 30
-    user_agent: ceChillHackers-professor/1.0
-
-bedrock:
-  knowledge_base_id: soon
-  data_source_id: soon
-  models:
-    rag: us.anthropic.claude-
-
-rag:
-  top_k: 5
-  chunk_size: 512
-  chunk_overlap: 64
+stuck_score:
+  pause_threshold_ms: 40000
+  repeat_error_threshold: 2
