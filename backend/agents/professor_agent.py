@@ -11,11 +11,6 @@ from config.config_loader import config
 from agents.tools import ProfessorRespondTool
 from db.models import ProfessorTurnResponse
 
-try:
-    from bedrock_agentcore import BedrockAgentCoreApp
-except ImportError:  # pragma: no cover - optional in local test env
-    BedrockAgentCoreApp = None
-
 
 PROMPT_PATH = (
     Path(__file__).resolve().parents[1] / "prompts" / "system_prompt.txt"
@@ -28,23 +23,25 @@ def load_system_prompt() -> str:
     return ""
 
 
+def _resolve_mode_default() -> str:
+    mode_default = str(config.get("agents.professor.mode_default", "strict")).strip().lower()
+    if mode_default in {"strict", "convenience"}:
+        return mode_default
+    return "strict"
+
+
+def _apply_mode_default(payload: dict[str, Any]) -> dict[str, Any]:
+    mode_value = payload.get("mode")
+    if mode_value is not None and str(mode_value).strip():
+        return payload
+    normalized_payload = dict(payload)
+    normalized_payload["mode"] = _resolve_mode_default()
+    return normalized_payload
+
+
 def invoke_professor(payload: dict[str, Any]) -> dict[str, Any]:
     """Run professor BaseTool and return validated strict payload."""
-    tool = ProfessorRespondTool(config=config)
-    raw_result = tool._run(payload)
+    tool = ProfessorRespondTool(config=config, system_prompt=load_system_prompt())
+    raw_result = tool._run(_apply_mode_default(payload))
     response = ProfessorTurnResponse.model_validate(json.loads(raw_result))
     return response.model_dump()
-
-
-if BedrockAgentCoreApp is not None:
-    app = BedrockAgentCoreApp()
-
-    @app.entrypoint
-    def professor_invocation(payload: dict[str, Any], context: Any) -> dict[str, Any]:
-        _ = context
-        _ = config
-        _ = load_system_prompt()
-        return {"result": invoke_professor(payload)}
-
-    if __name__ == "__main__":
-        app.run()

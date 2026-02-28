@@ -10,9 +10,9 @@ class ProfessorMode(str, Enum):
 
 class ProfessorTurnStrategy(str, Enum):
     SOCRATIC_QUESTION = "socratic_question"
-    HINT = "hint"
-    CONCEPT_EXPLAIN = "concept_explain"
-    ENCOURAGEMENT = "encouragement"
+    CONCEPTUAL_EXPLANATION = "conceptual_explanation"
+    PROCEDURAL_EXPLANATION = "procedural_explanation"
+    BROKEN_DOWN_QUESTIONS = "broken_down_questions"
 
 
 class ProfessorNextAction(str, Enum):

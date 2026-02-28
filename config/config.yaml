@@ -7,20 +7,27 @@ agents:
     enabled: true
     mode_default: strict
     llm:
-      provider: bedrock_converse
-      model_id: anthropic.claude-sonnet-4-5-20250929-v1:0
-      temperature: 0.3
+      provider: featherless
+      model_id: Qwen/Qwen2.5-7B-Instruct
+      temperature: 0.1
       max_tokens: 800
     runtime:
-      use_agentcore: false
-      agentcore_endpoint: ""
+      use_live_featherless: true
       timeout_sec: 30
       retries: 2
+      fallback_on_live_error: false
       streaming: false
     tutoring:
       socratic_default: true
       citations_enabled: true
       reveal_final_answer: false
+
+providers:
+  featherless:
+    base_url: https://api.featherless.ai/v1
+    api_key_env: FEATHERLESS_API_KEY
+    timeout_sec: 30
+    user_agent: ceChillHackers-professor/1.0
 
 bedrock:
   knowledge_base_id: soon

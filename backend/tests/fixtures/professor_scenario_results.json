@@ -1,0 +1,102 @@
+{
+  "results": [
+    {
+      "session_id": "scenario-001",
+      "topic": "calculus",
+      "mode": "strict",
+      "error": "ValueError: Featherless response failed semantic validation after retry: broken_down_questions_needs_multiple_guiding_questions; broken_down_questions_needs_multiple_guiding_questions"
+    },
+    {
+      "session_id": "scenario-002",
+      "topic": "algebra",
+      "mode": "strict",
+      "error": "ValueError: Featherless response failed semantic validation after retry: procedural_explanation_missing_step_sequence; procedural_explanation_missing_step_sequence"
+    },
+    {
+      "session_id": "scenario-003",
+      "topic": "linear algebra",
+      "mode": "convenience",
+      "expected_strategy": "conceptual_explanation",
+      "strategy": "conceptual_explanation",
+      "next_action": "continue",
+      "revealed_final_answer": false,
+      "citations_count": 0,
+      "assistant_response": "Understanding matrix multiplication as the composition of linear maps can help visualize transformations.",
+      "semantic_issues": []
+    },
+    {
+      "session_id": "scenario-004",
+      "topic": "probability",
+      "mode": "strict",
+      "expected_strategy": "conceptual_explanation",
+      "strategy": "conceptual_explanation",
+      "next_action": "continue",
+      "revealed_final_answer": false,
+      "citations_count": 0,
+      "assistant_response": "Bayes' theorem helps update probabilities based on new evidence. It's structured as P(A|B) = P(B|A) * P(A) / P(B). Here, A is your hypothesis, B is the observed evidence, and P(A|B) is the probability of A given B.",
+      "semantic_issues": []
+    },
+    {
+      "session_id": "scenario-005",
+      "topic": "trigonometry",
+      "mode": "convenience",
+      "expected_strategy": "conceptual_explanation",
+      "strategy": "conceptual_explanation",
+      "next_action": "continue",
+      "revealed_final_answer": false,
+      "citations_count": 0,
+      "assistant_response": "When dealing with triangles, sine law and cosine law are used in different scenarios. Sine law is useful when you have an angle and its opposite side, while cosine law is better for finding missing sides when you know two sides and the included angle.",
+      "semantic_issues": []
+    },
+    {
+      "session_id": "scenario-006",
+      "topic": "statistics",
+      "mode": "strict",
+      "expected_strategy": "conceptual_explanation",
+      "strategy": "conceptual_explanation",
+      "next_action": "continue",
+      "revealed_final_answer": false,
+      "citations_count": 0,
+      "assistant_response": "Understand variance as a measure of how spread out numbers are from the mean. It\u2019s like asking, 'How far do the data points typically deviate from the average?'",
+      "semantic_issues": []
+    },
+    {
+      "session_id": "scenario-007",
+      "topic": "geometry",
+      "mode": "strict",
+      "expected_strategy": "conceptual_explanation",
+      "strategy": "conceptual_explanation",
+      "next_action": "continue",
+      "revealed_final_answer": false,
+      "citations_count": 0,
+      "assistant_response": "When starting a proof, think about what you need to prove and what information is given. The first statement often relates to the given information.",
+      "semantic_issues": []
+    },
+    {
+      "session_id": "scenario-008",
+      "topic": "differential equations",
+      "mode": "convenience",
+      "error": "ValueError: Featherless response failed semantic validation after retry: broken_down_questions_needs_multiple_guiding_questions; broken_down_questions_needs_multiple_guiding_questions"
+    },
+    {
+      "session_id": "scenario-009",
+      "topic": "applied calculus",
+      "mode": "strict",
+      "expected_strategy": "socratic_question",
+      "strategy": "socratic_question",
+      "next_action": "continue",
+      "revealed_final_answer": false,
+      "citations_count": 0,
+      "assistant_response": "Can you share the specific word problem you're working on?",
+      "semantic_issues": []
+    },
+    {
+      "session_id": "scenario-010",
+      "topic": "probability",
+      "mode": "convenience",
+      "error": "ValueError: Featherless response failed semantic validation after retry: procedural_explanation_missing_step_sequence; procedural_explanation_missing_step_sequence"
+    }
+  ],
+  "errors": 4,
+  "semantic_failures": 0
+}

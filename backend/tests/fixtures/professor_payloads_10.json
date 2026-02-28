@@ -1,0 +1,112 @@
+[
+  {
+    "session_id": "scenario-001",
+    "message": "I keep mixing up derivative and slope. Please guide me without giving final answers.",
+    "topic": "calculus",
+    "mode": "strict",
+    "profile": {
+      "level": "beginner",
+      "learning_style": "mixed",
+      "pace": "medium"
+    }
+  },
+  {
+    "session_id": "scenario-002",
+    "message": "is 1 + 1 = 3?",
+    "topic": "algebra",
+    "mode": "strict",
+    "profile": {
+      "level": "beginner",
+      "learning_style": "example_first",
+      "pace": "slow"
+    }
+  },
+  {
+    "session_id": "scenario-003",
+    "message": "I know matrix multiplication steps but not the intuition behind composition of linear maps.",
+    "topic": "linear algebra",
+    "mode": "convenience",
+    "profile": {
+      "level": "intermediate",
+      "learning_style": "visual",
+      "pace": "fast"
+    }
+  },
+  {
+    "session_id": "scenario-004",
+    "message": "Please coach me on Bayes theorem setup, but do not compute the final number for me.",
+    "topic": "probability",
+    "mode": "strict",
+    "profile": {
+      "level": "intermediate",
+      "learning_style": "textual",
+      "pace": "medium"
+    }
+  },
+  {
+    "session_id": "scenario-005",
+    "message": "I forget when to use sine law versus cosine law in triangle problems.",
+    "topic": "trigonometry",
+    "mode": "convenience",
+    "profile": {
+      "level": "beginner",
+      "learning_style": "visual",
+      "pace": "medium"
+    }
+  },
+  {
+    "session_id": "scenario-006",
+    "message": "I can compute means but variance and standard deviation feel confusing conceptually.",
+    "topic": "statistics",
+    "mode": "strict",
+    "profile": {
+      "level": "intermediate",
+      "learning_style": "mixed",
+      "pace": "slow"
+    }
+  },
+  {
+    "session_id": "scenario-007",
+    "message": "In geometry proofs I do not know how to choose the first statement.",
+    "topic": "geometry",
+    "mode": "strict",
+    "profile": {
+      "level": "beginner",
+      "learning_style": "textual",
+      "pace": "medium"
+    }
+  },
+  {
+    "session_id": "scenario-008",
+    "message": "For first-order differential equations, I confuse separable and linear forms.",
+    "topic": "differential equations",
+    "mode": "convenience",
+    "profile": {
+      "level": "advanced",
+      "learning_style": "example_first",
+      "pace": "fast"
+    }
+  },
+  {
+    "session_id": "scenario-009",
+    "message": "I am stuck converting a word problem into equations for optimization.",
+    "topic": "applied calculus",
+    "mode": "strict",
+    "profile": {
+      "level": "advanced",
+      "learning_style": "mixed",
+      "pace": "medium"
+    }
+  },
+  {
+    "session_id": "scenario-010",
+    "message": "I need help understanding conditional probability with intuitive examples.",
+    "topic": "probability",
+    "mode": "convenience",
+    "profile": {
+      "level": "beginner",
+      "learning_style": "example_first",
+      "pace": "slow"
+    }
+  }
+]
