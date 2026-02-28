@@ -24,6 +24,7 @@ from db.models import (
     RagMode,
 )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -143,10 +144,36 @@ def _run_rag_context(
 
     try:
         output = runner.run(payload)
-        return output if isinstance(output, dict) else {"found": False, "citations": []}
+        if not isinstance(output, dict):
+            output = {"found": False, "citations": []}
     except Exception as exc:  # pragma: no cover - dependency/env dependent
         logger.warning("RAG call failed for problem_solve_ta_agent: %s", exc)
-        return {"found": False, "citations": [], "mode": rag_mode.value}
+        output = {"found": False, "citations": [], "mode": rag_mode.value}
+
+    # Auto-upgrade: if internal KB returned nothing, retry with external_ok
+    # so the RAG agent's built-in Exa web search fallback activates.
+    if (
+        not output.get("found")
+        and rag_mode is RagMode.INTERNAL_ONLY
+        and runner is not None
+    ):
+        logger.info(
+            "Internal KB returned no results for problem_solve; "
+            "retrying with external_ok to trigger web search fallback."
+        )
+        payload["mode"] = RagMode.EXTERNAL_OK.value
+        try:
+            output = runner.run(payload)
+            if not isinstance(output, dict):
+                output = {"found": False, "citations": []}
+        except Exception as exc:  # pragma: no cover
+            logger.warning("RAG external_ok retry failed: %s", exc)
+            output = {
+                "found": False, "citations": [],
+                "mode": RagMode.EXTERNAL_OK.value,
+            }
+
+    return output
 
 
 def invoke_problem_solve_ta(

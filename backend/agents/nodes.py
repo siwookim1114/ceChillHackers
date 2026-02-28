@@ -585,6 +585,36 @@ def _infer_difficulty_curve(state: OrchestratorState) -> tuple[str, str, list[st
     return current_band, target_band, recent_error_tags
 
 
+def _extract_topic_from_message(user_message: str, default_topic: str) -> str:
+    """Extract a specific topic from the user's message if possible.
+
+    If the user says "I want to solve probability problems", the topic
+    should be "probability" even if the session default is "linear algebra".
+    Falls back to the session default when no topic can be extracted.
+    """
+    msg = user_message.lower().strip()
+    if not msg:
+        return default_topic
+
+    # Common academic topics/subjects that might appear in the message
+    known_topics = [
+        "probability", "statistics", "calculus", "linear algebra",
+        "algebra", "geometry", "trigonometry", "differential equations",
+        "discrete math", "number theory", "combinatorics",
+        "real analysis", "complex analysis", "abstract algebra",
+        "topology", "graph theory", "optimization",
+        "machine learning", "deep learning", "neural networks",
+        "data structures", "algorithms", "recursion",
+        "physics", "chemistry", "biology",
+        "economics", "finance", "accounting",
+    ]
+    for topic in known_topics:
+        if topic in msg:
+            return topic
+
+    return default_topic
+
+
 def ta_problem_gen_node(state: OrchestratorState) -> dict:
     """Invoke the Problem Generation TA agent for practice problem generation.
 
@@ -608,17 +638,24 @@ def ta_problem_gen_node(state: OrchestratorState) -> dict:
         # Infer difficulty curve from context (escalation/de-escalation)
         current_band, target_band, recent_error_tags = _infer_difficulty_curve(state)
 
+        # Extract topic: prefer what the user actually asked about over session config.
+        # E.g., "I want to solve probability problems" → topic should be "probability"
+        # even if session.topic is "linear algebra".
+        user_msg = state.get("user_message", "")
+        session_topic = session.get("topic", "general")
+        topic = _extract_topic_from_message(user_msg, session_topic)
+
         payload = {
             "request_id": uuid4().hex,
             "user_id": profile_data.get("user_id", "anonymous"),
             "session_id": session.get("session_id", uuid4().hex),
-            "topic": session.get("topic", "general"),
+            "topic": topic,
             "profile": {
                 "level": profile_data.get("level", "intermediate"),
                 "learning_style": profile_data.get("learning_style", "mixed"),
                 "pace": profile_data.get("pace", "medium"),
             },
-            "mode": session.get("knowledge_mode", "internal_only"),
+            "mode": session.get("knowledge_mode", "mixed"),
             "desired_difficulty_curve": {
                 "current": current_band,
                 "target": target_band,
@@ -630,7 +667,9 @@ def ta_problem_gen_node(state: OrchestratorState) -> dict:
         if recent_error_tags:
             payload["recent_error_tags"] = recent_error_tags
 
-        result = invoke_problem_gen_ta(payload)
+        result = invoke_problem_gen_ta(
+            payload, user_message=state.get("user_message", "")
+        )
 
         # Build user-friendly response text from generated problems
         problems = result.get("problems", [])
@@ -758,7 +797,7 @@ def ta_problem_solve_node(state: OrchestratorState) -> dict:
                 "learning_style": profile_data.get("learning_style", "mixed"),
                 "pace": profile_data.get("pace", "medium"),
             },
-            "mode": session.get("knowledge_mode", "internal_only"),
+            "mode": session.get("knowledge_mode", "mixed"),
             "problem_ref": {
                 "problem_id": problem_id or uuid4().hex,
                 "statement": problem_statement,
@@ -843,7 +882,7 @@ def rag_node(state: OrchestratorState) -> dict:
             "prompt": state.get("user_message", ""),
             "caller": "manager",
             "subject": session.get("subject", session.get("topic", "")),
-            "mode": session.get("knowledge_mode", "internal_only"),
+            "mode": session.get("knowledge_mode", "external_ok"),
             "level": state.get("user_profile", {}).get("level", "intermediate"),
         })
 
