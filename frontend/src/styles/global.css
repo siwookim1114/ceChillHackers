@@ -191,6 +191,13 @@ label {
   justify-items: center;
 }
 
+.hero-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 .hint-text {
   font-size: 0.8rem;
   color: var(--muted);
@@ -242,6 +249,59 @@ label {
   margin: 0 auto;
   display: grid;
   gap: 20px;
+}
+
+.page-auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  margin: 0 auto;
+}
+
+.auth-card {
+  width: min(520px, 94vw);
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+
+.auth-card-wide {
+  width: min(760px, 94vw);
+}
+
+.auth-header {
+  display: grid;
+  gap: 6px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auth-submit {
+  width: 100%;
+}
+
+.auth-footnote {
+  font-size: 0.88rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.auth-footnote a {
+  color: #4338ca;
+  font-weight: 700;
+}
+
+.auth-note {
+  font-size: 0.82rem;
 }
 
 .onboarding-header {
@@ -1039,6 +1099,10 @@ label {
   }
 
   .side-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-grid-two {
     grid-template-columns: 1fr;
   }
 }

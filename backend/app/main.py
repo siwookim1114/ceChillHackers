@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import base64
+import hashlib
+import hmac
+import secrets
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,16 +15,18 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 try:
     import psycopg
+    from psycopg import errors as psycopg_errors
     from psycopg.rows import dict_row
     from psycopg.types.json import Json
 except ImportError:
     psycopg = None
+    psycopg_errors = None
     dict_row = None
     Json = None
 
@@ -50,6 +57,8 @@ def normalize_database_url(url: str) -> str:
 
 DATABASE_URL = normalize_database_url(DATABASE_URL)
 DB_ENABLED = bool(DATABASE_URL) and "<DB_PASSWORD>" not in DATABASE_URL
+APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "dev-only-change-me-please")
+ACCESS_TOKEN_TTL_SEC = int(os.getenv("ACCESS_TOKEN_TTL_SEC", "604800"))
 
 
 def utcnow() -> datetime:
@@ -86,6 +95,89 @@ def parse_json_list(value: Any) -> list[dict[str, str]] | None:
     return None
 
 
+def b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
+
+
+def b64url_decode(value: str) -> bytes:
+    padding = "=" * ((4 - len(value) % 4) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("utf-8"))
+
+
+def hash_password(password: str) -> str:
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long")
+    salt = secrets.token_bytes(16)
+    n, r, p = 2**14, 8, 1
+    digest = hashlib.scrypt(
+        password.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=32
+    )
+    return f"scrypt${n}${r}${p}${b64url_encode(salt)}${b64url_encode(digest)}"
+
+
+def verify_password(password: str, encoded_hash: str) -> bool:
+    try:
+        algo, n_str, r_str, p_str, salt_b64, digest_b64 = encoded_hash.split("$", 5)
+        if algo != "scrypt":
+            return False
+        n, r, p = int(n_str), int(r_str), int(p_str)
+        salt = b64url_decode(salt_b64)
+        expected = b64url_decode(digest_b64)
+        computed = hashlib.scrypt(
+            password.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=len(expected)
+        )
+        return hmac.compare_digest(expected, computed)
+    except Exception:
+        return False
+
+
+def create_access_token(user_id: str, email: str, role: str) -> str:
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "role": role,
+        "exp": int(time.time()) + ACCESS_TOKEN_TTL_SEC,
+    }
+    header_b64 = b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = b64url_encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    )
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    signature = hmac.new(
+        APP_SECRET_KEY.encode("utf-8"), signing_input, hashlib.sha256
+    ).digest()
+    return f"{header_b64}.{payload_b64}.{b64url_encode(signature)}"
+
+
+def decode_access_token(token: str) -> dict[str, Any]:
+    try:
+        header_b64, payload_b64, signature_b64 = token.split(".", 2)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid token format") from exc
+
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    expected_signature = hmac.new(
+        APP_SECRET_KEY.encode("utf-8"), signing_input, hashlib.sha256
+    ).digest()
+    provided_signature = b64url_decode(signature_b64)
+    if not hmac.compare_digest(expected_signature, provided_signature):
+        raise HTTPException(status_code=401, detail="Invalid token signature")
+
+    payload = json.loads(b64url_decode(payload_b64))
+    if int(payload.get("exp", 0)) < int(time.time()):
+        raise HTTPException(status_code=401, detail="Token expired")
+    return payload
+
+
+def parse_bearer_token(authorization: Optional[str]) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing authorization header")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+    return authorization.removeprefix("Bearer ").strip()
+
+
 class Problem(BaseModel):
     id: str
     title: str
@@ -106,6 +198,42 @@ class AttemptCreateResponse(BaseModel):
     attempt_id: str
     started_at: datetime
     problem: Problem
+
+
+UserRole = Literal["student", "teacher", "parent"]
+LearningStyle = Literal["explanation", "question", "problem_solving"]
+LearningPace = Literal["fast", "normal", "slow"]
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    display_name: Optional[str] = None
+    role: UserRole = "student"
+    learning_style: LearningStyle = "explanation"
+    learning_pace: LearningPace = "normal"
+    target_goal: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthUser(BaseModel):
+    id: str
+    email: str
+    display_name: str
+    role: UserRole
+    learning_style: Optional[LearningStyle] = None
+    learning_pace: Optional[LearningPace] = None
+    target_goal: Optional[str] = None
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: AuthUser
 
 
 EventType = Literal[
@@ -372,6 +500,47 @@ CREATE INDEX IF NOT EXISTS idx_attempt_stuck_scores_attempt_id
   ON attempt_stuck_scores(attempt_id);
 """
 
+AUTH_SCHEMA_SQL = """
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+    CREATE TYPE user_role AS ENUM ('student', 'teacher', 'parent');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'learning_style') THEN
+    CREATE TYPE learning_style AS ENUM ('explanation', 'question', 'problem_solving');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'learning_pace') THEN
+    CREATE TYPE learning_pace AS ENUM ('fast', 'normal', 'slow');
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role user_role NOT NULL,
+  display_name TEXT NOT NULL DEFAULT '',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((lower(email)));
+
+CREATE TABLE IF NOT EXISTS student_profiles (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  learning_style learning_style NOT NULL DEFAULT 'explanation',
+  learning_pace learning_pace NOT NULL DEFAULT 'normal',
+  target_goal TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
 
 def db_connect():
     if not DB_ENABLED:
@@ -386,6 +555,151 @@ def init_db_schema() -> None:
         with conn.cursor() as cur:
             cur.execute(DB_SCHEMA_SQL)
         conn.commit()
+
+
+def init_auth_schema() -> None:
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(AUTH_SCHEMA_SQL)
+        conn.commit()
+
+
+def require_db_enabled() -> None:
+    if not DB_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Auth requires DATABASE_URL. Configure shared PostgreSQL first.",
+        )
+
+
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def auth_user_from_row(row: dict[str, Any]) -> AuthUser:
+    return AuthUser(
+        id=str(row["id"]),
+        email=row["email"],
+        display_name=row["display_name"],
+        role=row["role"],
+        learning_style=row.get("learning_style"),
+        learning_pace=row.get("learning_pace"),
+        target_goal=row.get("target_goal"),
+    )
+
+
+def get_user_by_id_db(user_id: str) -> Optional[AuthUser]:
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  u.id::text AS id,
+                  u.email,
+                  u.display_name,
+                  u.role::text AS role,
+                  sp.learning_style::text AS learning_style,
+                  sp.learning_pace::text AS learning_pace,
+                  sp.target_goal
+                FROM users u
+                LEFT JOIN student_profiles sp ON sp.user_id = u.id
+                WHERE u.id = %s::uuid AND u.is_active = TRUE
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return auth_user_from_row(row)
+
+
+def signup_db(payload: SignupRequest) -> AuthResponse:
+    email = normalize_email(payload.email)
+    display_name = (payload.display_name or email.split("@")[0]).strip() or "Student"
+    password_hash = hash_password(payload.password)
+    user_id: Optional[str] = None
+
+    try:
+        with db_connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (email, password_hash, role, display_name)
+                    VALUES (%s, %s, %s::user_role, %s)
+                    RETURNING id::text AS id, email, display_name, role::text AS role
+                    """,
+                    (email, password_hash, payload.role, display_name),
+                )
+                user_row = cur.fetchone()
+                user_id = user_row["id"]
+
+                if payload.role == "student":
+                    cur.execute(
+                        """
+                        INSERT INTO student_profiles (
+                          user_id, learning_style, learning_pace, target_goal
+                        ) VALUES (%s::uuid, %s::learning_style, %s::learning_pace, %s)
+                        ON CONFLICT (user_id) DO UPDATE SET
+                          learning_style = EXCLUDED.learning_style,
+                          learning_pace = EXCLUDED.learning_pace,
+                          target_goal = EXCLUDED.target_goal,
+                          updated_at = now()
+                        """,
+                        (
+                            user_id,
+                            payload.learning_style,
+                            payload.learning_pace,
+                            payload.target_goal,
+                        ),
+                    )
+            conn.commit()
+    except Exception as exc:
+        if psycopg_errors and isinstance(exc, psycopg_errors.UniqueViolation):
+            raise HTTPException(status_code=409, detail="Email already exists") from exc
+        raise
+
+    if not user_id:
+        raise HTTPException(status_code=500, detail="Failed to create user")
+
+    user = get_user_by_id_db(user_id)
+    if not user:
+        raise HTTPException(status_code=500, detail="Failed to create user profile")
+
+    token = create_access_token(user.id, user.email, user.role)
+    return AuthResponse(access_token=token, user=user)
+
+
+def login_db(payload: LoginRequest) -> AuthResponse:
+    email = normalize_email(payload.email)
+
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  u.id::text AS id,
+                  u.email,
+                  u.display_name,
+                  u.role::text AS role,
+                  u.password_hash,
+                  sp.learning_style::text AS learning_style,
+                  sp.learning_pace::text AS learning_pace,
+                  sp.target_goal
+                FROM users u
+                LEFT JOIN student_profiles sp ON sp.user_id = u.id
+                WHERE lower(u.email) = %s AND u.is_active = TRUE
+                LIMIT 1
+                """,
+                (email,),
+            )
+            row = cur.fetchone()
+
+    if not row or not verify_password(payload.password, row["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    user = auth_user_from_row(row)
+    token = create_access_token(user.id, user.email, user.role)
+    return AuthResponse(access_token=token, user=user)
 
 
 def load_attempt_state_db(attempt_id: str) -> AttemptState | None:
@@ -689,6 +1003,7 @@ def on_startup() -> None:
             )
         try:
             init_db_schema()
+            init_auth_schema()
         except Exception as exc:
             raise RuntimeError(
                 "Failed to connect to PostgreSQL. Check DATABASE_URL, RDS public access, "
@@ -699,6 +1014,29 @@ def on_startup() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "storage": "postgres" if DB_ENABLED else "memory"}
+
+
+@app.post("/api/auth/signup", response_model=AuthResponse)
+def signup(payload: SignupRequest) -> AuthResponse:
+    require_db_enabled()
+    return signup_db(payload)
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+def login(payload: LoginRequest) -> AuthResponse:
+    require_db_enabled()
+    return login_db(payload)
+
+
+@app.get("/api/auth/me", response_model=AuthUser)
+def get_me(authorization: Optional[str] = Header(None, alias="Authorization")) -> AuthUser:
+    require_db_enabled()
+    token = parse_bearer_token(authorization)
+    payload = decode_access_token(token)
+    user = get_user_by_id_db(str(payload["sub"]))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    return user
 
 
 @app.get("/api/problems", response_model=list[Problem])

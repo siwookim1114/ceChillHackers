@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { clearAuthSession, getAccessToken, getAuthUser } from "../auth";
 
 type AppShellProps = {
   title: string;
@@ -17,6 +18,17 @@ const NAV_ITEMS = [
 export function AppShell({ title, subtitle, children }: AppShellProps) {
   const navigate = useNavigate();
   const level = localStorage.getItem("preferred_level") ?? "Beginner";
+  const authUser = getAuthUser();
+  const isAuthenticated = Boolean(getAccessToken() && authUser);
+
+  const handleExit = () => {
+    if (isAuthenticated) {
+      clearAuthSession();
+      navigate("/login");
+      return;
+    }
+    navigate("/");
+  };
 
   return (
     <div className="dashboard-shell">
@@ -30,8 +42,8 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
         </div>
 
         <div className="user-status">
-          <span>{level}</span>
-          <small>Guest</small>
+          <span>{isAuthenticated ? authUser?.display_name : level}</span>
+          <small>{isAuthenticated ? authUser?.role : "Guest"}</small>
         </div>
 
         <nav className="side-nav">
@@ -42,8 +54,8 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
           ))}
         </nav>
 
-        <button className="btn-muted side-cta" onClick={() => navigate("/")} type="button">
-          Exit Session
+        <button className="btn-muted side-cta" onClick={handleExit} type="button">
+          {isAuthenticated ? "Log Out" : "Exit Session"}
         </button>
       </aside>
 
