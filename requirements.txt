@@ -1,3 +1,8 @@
+# Basic Config
+awscli   # Amazon
+# Models and Schema
+pydantic
+
 # Front End
 
 
@@ -17,5 +22,5 @@ langchain-aws
 langchain-core
 boto3
 elevenlabs
-pydantic
 python-dotenv
+pymupdf
