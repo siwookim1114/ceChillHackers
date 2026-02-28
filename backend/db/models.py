@@ -1,4 +1,6 @@
 from __future__ import annotations
+import base64
+import binascii
 from datetime import datetime
 from enum import Enum
 from typing import Literal
@@ -386,3 +388,49 @@ class ProblemSolvingTAResponse(BaseModel):
             raise ValueError("mode=internal_only requires citations for graded feedback")
 
         return self
+
+
+class ScanParserRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    image_bytes_b64: str = Field(min_length=1, max_length=10_000_000)
+    image_mime_type: str | None = None
+    attempt_id: str | None = None
+    topic: str | None = None
+    problem_statement_hint: str | None = None
+    ocr_text: str | None = None
+    answer_hint: str | None = None
+    units_hint: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_image_payload(self) -> "ScanParserRequest":
+        raw = self.image_bytes_b64.strip()
+        if not raw:
+            raise ValueError("image_bytes_b64 cannot be empty")
+        try:
+            decoded = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("image_bytes_b64 must be valid base64 content") from exc
+        if not decoded:
+            raise ValueError("image_bytes_b64 decoded to empty bytes")
+        if len(decoded) > 5 * 1024 * 1024:
+            raise ValueError("image payload must be <= 5MB")
+        return self
+
+
+class ScanParserDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    focus_score: int = Field(ge=0, le=100)
+    effort_score: int = Field(ge=0, le=100)
+    text_lines: int = Field(ge=0)
+    equation_like_lines: int = Field(ge=0)
+    image_input_present: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ScanParserResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scan_parse: ScanParseInput
+    diagnostics: ScanParserDiagnostics

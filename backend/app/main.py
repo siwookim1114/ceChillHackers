@@ -27,7 +27,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
+from db.models import ScanParserRequest, ScanParserResponse
+from agents.scan_parser import parse_scan_submission
 
 try:
     import psycopg
@@ -1449,6 +1451,18 @@ def on_startup() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "storage": "postgres" if DB_ENABLED else "memory"}
+
+
+@app.post("/api/scan/parse", response_model=ScanParserResponse)
+def parse_scan(payload: ScanParserRequest) -> ScanParserResponse:
+    """Parse handwritten/typed student work into structured TA scan payload.
+
+    Raw image bytes are processed in-memory only and not persisted.
+    """
+    try:
+        return parse_scan_submission(payload)
+    except (ValueError, PydanticValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/auth/signup", response_model=AuthResponse)
