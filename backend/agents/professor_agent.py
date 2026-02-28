@@ -8,8 +8,8 @@ from typing import Any
 
 from config.config_loader import config
 
-from backend.agents.schemas.professor import ProfessorTurnResponse
-from backend.agents.tools import ProfessorRespondTool
+from agents.tools import ProfessorRespondTool
+from db.models import ProfessorTurnResponse
 
 try:
     from bedrock_agentcore import BedrockAgentCoreApp

@@ -21,7 +21,12 @@ def parse_tool_input(tool_input: Union[str, dict]) -> dict:
         try:
             parsed = json.loads(tool_input)
         except json.JSONDecodeError as exc:
-            logger.error("parse_tool_input received invalid JSON: %s", tool_input[:200])
+            # Do not log raw content. Keep metadata-only logging.
+            logger.error(
+                "parse_tool_input received invalid JSON (input_type=%s, length=%s)",
+                type(tool_input).__name__,
+                len(tool_input),
+            )
             raise ValueError(f"Tool input is not valid JSON: {exc}") from exc
         if not isinstance(parsed, dict):
             raise TypeError(f"Expected JSON object, got {type(parsed).__name__}")

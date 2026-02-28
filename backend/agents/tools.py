@@ -1,11 +1,12 @@
-"""RAG agent tools for the AI tutoring platform.
+"""Agent tools for the AI tutoring platform.
 
-Provides the four BaseTool classes used by RagAgent for knowledge-base
-retrieval and document management.  These tools are shared across all
-calling agents (Professor, TA, Manager) -- no agent-specific logic here.
+Provides BaseTool classes for:
+- Professor turn response scaffolding (strict JSON schema)
+- RAG knowledge-base retrieval and document management
 
 Tools
 -----
+ProfessorRespondTool     - Professor turn response generation scaffold
 RetrieveContextTool      - Semantic search over Bedrock Knowledge Base
 UploadDocumentTool       - PDF/slide upload to S3 + KB ingestion trigger
 CheckIngestionStatusTool - Poll ingestion job progress
@@ -24,9 +25,144 @@ import boto3
 from langchain_aws import AmazonKnowledgeBasesRetriever
 from langchain_core.tools import BaseTool
 
+from db.models import (
+    Citation,
+    ProfessorMode,
+    ProfessorNextAction,
+    ProfessorTurnRequest,
+    ProfessorTurnResponse,
+    ProfessorTurnStrategy,
+)
 from utils.helpers import parse_tool_input
 
 logger = logging.getLogger(__name__)
+
+PROFESSOR_CONFIG_PATH = "agents.professor"
+
+
+# ---------------------------------------------------------------------------
+# 0. ProfessorRespondTool
+# ---------------------------------------------------------------------------
+
+class ProfessorRespondTool(BaseTool):
+    """Professor tutoring tool with strict request/response schema handling."""
+
+    name: str = "professor_respond"
+    description: str = (
+        "Generate one tutoring response turn for the Professor agent.\n"
+        "\n"
+        "INPUT (JSON object):\n"
+        "  session_id (str, REQUIRED)\n"
+        "  message    (str, REQUIRED)\n"
+        "  topic      (str, REQUIRED)\n"
+        "  mode       (str, optional) - strict | convenience (default: strict)\n"
+        "  profile    (object, REQUIRED) - level/learning_style/pace\n"
+        "\n"
+        "OUTPUT (JSON object):\n"
+        "  assistant_response (str)\n"
+        "  strategy           (str)\n"
+        "  revealed_final_answer (false)\n"
+        "  next_action        (str)\n"
+        "  citations          (list)\n"
+        "\n"
+        "Always returns strict JSON matching ProfessorTurnResponse schema."
+    )
+
+    professor_config: Any = None
+    citations_enabled: bool = True
+    socratic_default: bool = True
+
+    def __init__(self, config: Any, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.professor_config = self._load_professor_runtime_config(config)
+        tutoring_cfg = self.professor_config.get("tutoring", {})
+        self.citations_enabled = bool(tutoring_cfg.get("citations_enabled", True))
+        self.socratic_default = bool(tutoring_cfg.get("socratic_default", True))
+
+    @staticmethod
+    def _load_professor_runtime_config(config: Any) -> dict[str, Any]:
+        professor_config = config.get(PROFESSOR_CONFIG_PATH)
+        if not isinstance(professor_config, dict):
+            raise ValueError(
+                f"Missing or invalid config mapping at '{PROFESSOR_CONFIG_PATH}'"
+            )
+
+        llm_cfg = professor_config.get("llm")
+        tutoring_cfg = professor_config.get("tutoring")
+        if not isinstance(llm_cfg, dict):
+            raise ValueError("Missing or invalid config mapping at 'agents.professor.llm'")
+        if not isinstance(tutoring_cfg, dict):
+            raise ValueError("Missing or invalid config mapping at 'agents.professor.tutoring'")
+        if not llm_cfg.get("provider"):
+            raise ValueError("Missing required config key: 'agents.professor.llm.provider'")
+        if not llm_cfg.get("model_id"):
+            raise ValueError("Missing required config key: 'agents.professor.llm.model_id'")
+        return professor_config
+
+    @staticmethod
+    def map_professor_mode_to_rag_mode(mode: ProfessorMode) -> str:
+        """Normalize Professor mode to the equivalent RAG mode."""
+        if mode is ProfessorMode.STRICT:
+            return "internal_only"
+        return "external_ok"
+
+    @staticmethod
+    def sanitize_for_log(request: ProfessorTurnRequest) -> dict[str, Any]:
+        """Return metadata-only logs (no raw student message)."""
+        return {
+            "session_id": request.session_id,
+            "mode": request.mode.value,
+            "rag_mode": ProfessorRespondTool.map_professor_mode_to_rag_mode(request.mode),
+            "topic": request.topic,
+            "message_length": len(request.student_message),
+            "profile_level": request.profile.level,
+        }
+
+    @staticmethod
+    def get_professor_json_schemas() -> dict[str, dict[str, Any]]:
+        """Expose strict transport schemas for validation in caller layers."""
+        return {
+            "ProfessorTurnRequest": ProfessorTurnRequest.model_json_schema(),
+            "ProfessorTurnResponse": ProfessorTurnResponse.model_json_schema(),
+        }
+
+    def _retrieve_citations(self, request: ProfessorTurnRequest) -> list[Citation]:
+        """Return citations from RAG when wired; empty list for now."""
+        if not self.citations_enabled:
+            return []
+        # Do not fabricate citations. Until RAG retrieval is connected,
+        # return an empty list instead of synthetic sources.
+        _ = self.map_professor_mode_to_rag_mode(request.mode)
+        return []
+
+    def _build_response(self, request: ProfessorTurnRequest) -> ProfessorTurnResponse:
+        citations = self._retrieve_citations(request)
+        if self.socratic_default:
+            strategy = ProfessorTurnStrategy.SOCRATIC_QUESTION
+            response_text = (
+                f"Before we solve it, can you explain in one sentence what the key idea in "
+                f"{request.topic} is?"
+            )
+        else:
+            strategy = ProfessorTurnStrategy.CONCEPT_EXPLAIN
+            response_text = (
+                f"Let's do a short recap: in {request.topic}, focus on the core principle "
+                "first, then we can apply it to your problem."
+            )
+
+        return ProfessorTurnResponse(
+            assistant_response=response_text,
+            strategy=strategy,
+            revealed_final_answer=False,
+            next_action=ProfessorNextAction.CONTINUE,
+            citations=citations,
+        )
+
+    def _run(self, tool_input: Union[str, dict]) -> str:
+        params = parse_tool_input(tool_input)
+        request = ProfessorTurnRequest.model_validate(params)
+        response = self._build_response(request)
+        return response.model_dump_json()
 
 
 # ---------------------------------------------------------------------------
