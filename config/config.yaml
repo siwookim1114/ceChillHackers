@@ -18,7 +18,7 @@ rag:
   chunk_overlap: 200
   s3_docs_prefix: docs/
   cache_dir: /tmp/cechillhackers_cache
-  relevance_threshold: 0.15
+  relevance_threshold: 0.25
 
 exa:
   num_results: 5
@@ -28,9 +28,20 @@ exa:
   max_highlight_chars: 500
 
 agents:
+  manager:
+    enabled: true
+    classification_mode: rule_based   # rule_based | llm | hybrid
+    max_routing_depth: 3              # loop detection threshold
+    default_route: professor          # fallback when classification fails
+    hitl_enabled: false               # global human-in-the-loop toggle
   professor:
     enabled: true
-    mode_default: strict   
+    mode_default: strict
+    llm:
+      provider: featherless
+      model_id: Qwen/Qwen2.5-32B-Instruct
+      temperature: 0.3
+      max_tokens: 800
     runtime:
       use_live_featherless: true
       timeout_sec: 30
@@ -41,6 +52,20 @@ agents:
       socratic_default: true
       citations_enabled: true
       reveal_final_answer: false
+
+voice:
+  stt:
+    provider: local_whisper
+    model_size: base        # tiny | base | small | medium | large-v3
+  tts:
+    provider: minimax
+    model: speech-2.8-hd
+    voice_id: English_Insightful_Speaker
+    speed: 1.0
+    emotion: calm
+    format: mp3
+    sample_rate: 24000
+    timeout_sec: 15
 
 stuck_score:
   pause_threshold_ms: 40000

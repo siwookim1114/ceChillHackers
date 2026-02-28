@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import base64
 import hashlib
 import hmac
@@ -14,6 +15,13 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from urllib import error as urllib_error, request as urllib_request
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
+
+# Ensure the project root (parent of backend/) is on sys.path so that
+# `from config.config_loader import ...` resolves correctly when uvicorn
+# is started from the backend/ directory.
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query
@@ -1417,6 +1425,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Professor Agent routes (text + voice)
+from app.routes.professor import router as professor_router
+app.include_router(professor_router)
+
 
 @app.on_event("startup")
 def on_startup() -> None:
@@ -1699,3 +1711,226 @@ def get_summary(attempt_id: str) -> AttemptSummaryResponse:
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
     return summary_from_attempt(attempt)
+
+
+# ---------------------------------------------------------------------------
+# Orchestration endpoints (LangGraph multi-agent)
+# ---------------------------------------------------------------------------
+
+class OrchestratorChatRequest(BaseModel):
+    """Incoming chat message routed through the LangGraph orchestration graph."""
+    session_id: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    topic: str = Field(default="general", min_length=1)
+    user_id: str | None = None
+    level: str = "intermediate"
+    learning_style: str = "mixed"
+    pace: str = "medium"
+    mode: str = "strict"
+    knowledge_mode: str = "internal_only"
+    require_human_review: bool = False
+
+
+class OrchestratorChatResponse(BaseModel):
+    """Response from the orchestration graph."""
+    session_id: str
+    agent_name: str
+    response_text: str
+    structured_data: dict = Field(default_factory=dict)
+    citations: list = Field(default_factory=list)
+    next_action: str = "continue"
+    route_used: str = ""
+    intent: str = ""
+    awaiting_feedback: bool = False
+    turn_count: int = 0
+    rag_found: bool = False
+    rag_citations_count: int = 0
+
+
+class OrchestratorFeedbackRequest(BaseModel):
+    """Human-in-the-loop feedback submission to resume the graph."""
+    session_id: str = Field(min_length=1)
+    thread_id: str = Field(min_length=1)
+    action: str = Field(min_length=1)       # approve | revise | reroute | cancel
+    feedback_text: str = ""
+    reroute_to: str | None = None
+
+
+@app.post("/api/chat", response_model=OrchestratorChatResponse)
+def orchestrator_chat(req: OrchestratorChatRequest):
+    """Main chat endpoint -- invokes the LangGraph orchestration graph.
+
+    Routes the user message through Manager → specialist agent → response.
+    Preserves conversation history across turns via the checkpointer.
+    Detects HITL interrupts and returns awaiting_feedback=True when paused.
+    """
+    from agents.graph import get_graph
+
+    graph = get_graph()
+    thread_id = req.session_id
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # Check if this thread already has checkpointed state (i.e., not the
+    # first message). If so, preserve agent_outputs_history and increment
+    # turn_count rather than overwriting with empty lists.
+    existing_state = None
+    try:
+        snapshot = graph.get_state(config)
+        if snapshot and snapshot.values and snapshot.values.get("agent_outputs_history"):
+            existing_state = snapshot.values
+    except Exception:
+        pass
+
+    turn_count = 0
+    if existing_state:
+        turn_count = existing_state.get("session", {}).get("turn_count", 0) + 1
+
+    input_state = {
+        "user_message": req.message,
+        "user_profile": {
+            "user_id": req.user_id or "anonymous",
+            "level": req.level,
+            "learning_style": req.learning_style,
+            "pace": req.pace,
+        },
+        "session": {
+            "session_id": req.session_id,
+            "topic": req.topic,
+            "subject": req.topic,
+            "mode": req.mode,
+            "knowledge_mode": req.knowledge_mode,
+            "require_human_review": req.require_human_review,
+            "turn_count": turn_count,
+        },
+        # Reset per-turn transient fields
+        "route_history": [],
+        "routing": {},
+        "agent_output": {},
+        "human_feedback": None,
+        "error": None,
+        "final_response": {},
+        "awaiting_feedback": False,
+        "rag_context": "",
+        "rag_citations": [],
+        "rag_found": False,
+    }
+
+    # For the first turn, initialize agent_outputs_history.
+    # For subsequent turns, do NOT include it so the checkpointer
+    # preserves the accumulated history from previous turns.
+    if not existing_state:
+        input_state["agent_outputs_history"] = []
+
+    try:
+        result = graph.invoke(input_state, config)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Orchestration error: {exc}")
+
+    # Detect HITL interrupt: graph paused before human_feedback node.
+    # When interrupted, final_response won't be set but agent_output will exist.
+    final = result.get("final_response") or {}
+    routing = result.get("routing") or {}
+    agent_output = result.get("agent_output") or {}
+    is_interrupted = (
+        not final.get("response_text")
+        and agent_output.get("response_text")
+    )
+
+    rag_found = result.get("rag_found", False)
+    rag_citations = result.get("rag_citations", [])
+
+    if is_interrupted:
+        # Graph is paused for HITL -- return agent output as preview
+        return OrchestratorChatResponse(
+            session_id=req.session_id,
+            agent_name=agent_output.get("agent_name", "unknown"),
+            response_text=agent_output.get("response_text", ""),
+            structured_data=agent_output.get("structured_data", {}),
+            citations=agent_output.get("citations", []),
+            next_action=agent_output.get("next_action", "continue"),
+            route_used=routing.get("route", ""),
+            intent=routing.get("intent", ""),
+            awaiting_feedback=True,
+            turn_count=turn_count,
+            rag_found=rag_found,
+            rag_citations_count=len(rag_citations),
+        )
+
+    return OrchestratorChatResponse(
+        session_id=req.session_id,
+        agent_name=final.get("agent_name", "unknown"),
+        response_text=final.get("response_text", "No response generated."),
+        structured_data=final.get("structured_data", {}),
+        citations=final.get("citations", []),
+        next_action=final.get("next_action", "continue"),
+        route_used=routing.get("route", ""),
+        intent=routing.get("intent", ""),
+        awaiting_feedback=False,
+        turn_count=turn_count,
+        rag_found=rag_found,
+        rag_citations_count=len(rag_citations),
+    )
+
+
+@app.post("/api/chat/feedback", response_model=OrchestratorChatResponse)
+def orchestrator_feedback(req: OrchestratorFeedbackRequest):
+    """Resume graph execution after human-in-the-loop feedback.
+
+    Called when the user reviews an agent response and chooses to
+    approve, revise, reroute, or cancel.
+    """
+    from langgraph.types import Command
+
+    from agents.graph import get_graph
+
+    graph = get_graph()
+    config = {"configurable": {"thread_id": req.thread_id}}
+
+    feedback_value = {
+        "feedback_text": req.feedback_text,
+        "action": req.action,
+        "reroute_to": req.reroute_to,
+    }
+
+    try:
+        result = graph.invoke(Command(resume=feedback_value), config)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Feedback resume error: {exc}")
+
+    final = result.get("final_response") or {}
+    routing = result.get("routing") or {}
+    agent_output = result.get("agent_output") or {}
+    turn_count = result.get("session", {}).get("turn_count", 0)
+
+    # Check if the graph paused again (e.g., revise → agent → HITL again)
+    is_interrupted = (
+        not final.get("response_text")
+        and agent_output.get("response_text")
+    )
+
+    if is_interrupted:
+        return OrchestratorChatResponse(
+            session_id=req.session_id,
+            agent_name=agent_output.get("agent_name", "unknown"),
+            response_text=agent_output.get("response_text", ""),
+            structured_data=agent_output.get("structured_data", {}),
+            citations=agent_output.get("citations", []),
+            next_action=agent_output.get("next_action", "continue"),
+            route_used=routing.get("route", ""),
+            intent=routing.get("intent", ""),
+            awaiting_feedback=True,
+            turn_count=turn_count,
+        )
+
+    return OrchestratorChatResponse(
+        session_id=req.session_id,
+        agent_name=final.get("agent_name", "unknown"),
+        response_text=final.get("response_text", "No response generated."),
+        structured_data=final.get("structured_data", {}),
+        citations=final.get("citations", []),
+        next_action=final.get("next_action", "continue"),
+        route_used=routing.get("route", ""),
+        intent=routing.get("intent", ""),
+        awaiting_feedback=False,
+        turn_count=turn_count,
+    )

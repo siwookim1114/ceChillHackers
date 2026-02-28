@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Professor Voice Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f0f1a;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+  }
+  h1 {
+    font-size: 28px;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+  .subtitle {
+    color: #888;
+    margin-bottom: 40px;
+    font-size: 14px;
+  }
+  .topic-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+    width: 100%;
+    max-width: 500px;
+  }
+  .topic-row label {
+    font-size: 14px;
+    color: #aaa;
+    align-self: center;
+    white-space: nowrap;
+  }
+  .topic-row input {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: #1a1a2e;
+    color: #fff;
+    font-size: 15px;
+    outline: none;
+  }
+  .topic-row input:focus { border-color: #6c63ff; }
+
+  .mic-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 30px;
+  }
+  .mic-btn {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 3px solid #333;
+    background: #1a1a2e;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .mic-btn:hover { border-color: #6c63ff; background: #222244; }
+  .mic-btn.recording {
+    border-color: #ff4444;
+    background: #2a1a1a;
+    animation: pulse 1.5s infinite;
+  }
+  .mic-btn.processing {
+    border-color: #ffaa00;
+    background: #2a2a1a;
+    cursor: wait;
+  }
+  .mic-btn svg { width: 48px; height: 48px; fill: #888; }
+  .mic-btn:hover svg { fill: #6c63ff; }
+  .mic-btn.recording svg { fill: #ff4444; }
+  .mic-btn.processing svg { fill: #ffaa00; }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.4); }
+    50% { box-shadow: 0 0 0 20px rgba(255, 68, 68, 0); }
+  }
+
+  .mic-label {
+    margin-top: 14px;
+    font-size: 14px;
+    color: #888;
+    min-height: 20px;
+  }
+
+  .chat-area {
+    width: 100%;
+    max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .message {
+    padding: 16px 20px;
+    border-radius: 12px;
+    font-size: 15px;
+    line-height: 1.6;
+    max-width: 90%;
+    word-wrap: break-word;
+  }
+  .message.user {
+    background: #2a2a4a;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+    color: #c8c8ff;
+  }
+  .message.professor {
+    background: #1a2a1a;
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+    color: #c8ffc8;
+  }
+  .message .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    opacity: 0.6;
+  }
+  .message .meta {
+    font-size: 12px;
+    margin-top: 8px;
+    opacity: 0.5;
+  }
+
+  .text-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    max-width: 600px;
+    margin-top: 20px;
+  }
+  .text-row input {
+    flex: 1;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid #333;
+    background: #1a1a2e;
+    color: #fff;
+    font-size: 15px;
+    outline: none;
+  }
+  .text-row input:focus { border-color: #6c63ff; }
+  .text-row button {
+    padding: 12px 20px;
+    border-radius: 10px;
+    border: none;
+    background: #6c63ff;
+    color: #fff;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .text-row button:hover { background: #5a52dd; }
+  .text-row button:disabled { background: #333; cursor: wait; }
+
+  .or-divider {
+    color: #555;
+    font-size: 13px;
+    margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Professor Voice Test</h1>
+<p class="subtitle">Click the mic to ask a question. The professor will reply with voice.</p>
+
+<div class="topic-row">
+  <label>Topic:</label>
+  <input type="text" id="topic" value="linear algebra" placeholder="e.g. calculus, linear algebra">
+</div>
+
+<div class="mic-container">
+  <button class="mic-btn" id="micBtn" onclick="toggleRecording()">
+    <svg viewBox="0 0 24 24" id="micIcon">
+      <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+      <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+    </svg>
+  </button>
+  <div class="mic-label" id="micLabel">Click to start recording</div>
+</div>
+
+<p class="or-divider">or type your question below</p>
+
+<div class="text-row">
+  <input type="text" id="textInput" placeholder="Type a question..." onkeydown="if(event.key==='Enter')sendText()">
+  <button id="sendBtn" onclick="sendText()">Send</button>
+</div>
+
+<div class="chat-area" id="chatArea"></div>
+
+<script>
+const API_BASE = 'http://localhost:8000';
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+let isProcessing = false;
+
+function toggleRecording() {
+  if (isProcessing) return;
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      sendVoice(blob);
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    document.getElementById('micBtn').classList.add('recording');
+    document.getElementById('micLabel').textContent = 'Recording... Click to stop';
+  } catch (err) {
+    alert('Microphone access denied. Please allow microphone access.');
+    console.error(err);
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  isRecording = false;
+  document.getElementById('micBtn').classList.remove('recording');
+}
+
+async function sendVoice(audioBlob) {
+  isProcessing = true;
+  const btn = document.getElementById('micBtn');
+  const label = document.getElementById('micLabel');
+  btn.classList.add('processing');
+  label.textContent = 'Processing... (STT + Professor + TTS)';
+
+  const topic = document.getElementById('topic').value || 'general';
+  const formData = new FormData();
+  formData.append('audio', audioBlob, 'recording.webm');
+  formData.append('topic', topic);
+  formData.append('session_id', 'voice-ui-' + Date.now());
+  formData.append('mode', 'strict');
+  formData.append('level', 'intermediate');
+  formData.append('learning_style', 'mixed');
+  formData.append('pace', 'medium');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/professor/voice`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+
+    // Show transcript (what you said)
+    addMessage('user', data.transcript);
+
+    // Show professor response
+    addMessage('professor', data.assistant_response, data.strategy);
+
+    // Play audio response
+    if (data.audio_base64) {
+      playAudio(data.audio_base64);
+    }
+
+  } catch (err) {
+    label.textContent = 'Error: ' + err.message;
+    console.error(err);
+    addMessage('professor', 'Error: ' + err.message);
+  } finally {
+    isProcessing = false;
+    btn.classList.remove('processing');
+    label.textContent = 'Click to start recording';
+  }
+}
+
+async function sendText() {
+  const input = document.getElementById('textInput');
+  const btn = document.getElementById('sendBtn');
+  const message = input.value.trim();
+  if (!message) return;
+
+  btn.disabled = true;
+  btn.textContent = '...';
+  input.value = '';
+  addMessage('user', message);
+
+  const topic = document.getElementById('topic').value || 'general';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/professor/chat-voice`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: 'text-ui-' + Date.now(),
+        message: message,
+        topic: topic,
+        mode: 'strict',
+        profile: { level: 'intermediate', learning_style: 'mixed', pace: 'medium' }
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    addMessage('professor', data.assistant_response, data.strategy);
+
+    if (data.audio_base64) {
+      playAudio(data.audio_base64);
+    }
+
+  } catch (err) {
+    addMessage('professor', 'Error: ' + err.message);
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+
+function addMessage(role, text, strategy) {
+  const area = document.getElementById('chatArea');
+  const div = document.createElement('div');
+  div.className = `message ${role}`;
+  const label = role === 'user' ? 'You' : 'Professor';
+  const meta = strategy ? `<div class="meta">Strategy: ${strategy}</div>` : '';
+  div.innerHTML = `<div class="label">${label}</div>${text}${meta}`;
+  area.appendChild(div);
+  div.scrollIntoView({ behavior: 'smooth' });
+}
+
+function playAudio(base64) {
+  const audio = new Audio(`data:audio/mp3;base64,${base64}`);
+  audio.play().catch(err => console.error('Audio playback failed:', err));
+}
+</script>
+
+</body>
+</html>

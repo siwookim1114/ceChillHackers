@@ -49,8 +49,10 @@ from prompts.rag_prompt import (
     _INTERNAL_ADDENDUM,
 )
 
-logger = logging.getLogger(__name__)
 from langchain.chat_models import init_chat_model
+
+logger = logging.getLogger(__name__)
+
 
 class RagAgent:
     """
@@ -167,15 +169,17 @@ class RagAgent:
         Parameters
         ----------
         payload : dict
-            prompt  (str, REQUIRED) - The query or instruction.
-            caller  (str, optional) - "professor" | "ta" | "manager"
-            subject (str, optional) - Course/subject filter.
-            mode    (str, optional) - "internal_only" (default) | "external_ok" | "external_only"
-            level   (str, optional) - "beginner" | "intermediate" | "advanced"
+            prompt         (str, REQUIRED) - The query or instruction.
+            caller         (str, optional) - "professor" | "ta" | "manager"
+            subject        (str, optional) - Course/subject filter.
+            mode           (str, optional) - "internal_only" (default) | "external_ok" | "external_only"
+            level          (str, optional) - "beginner" | "intermediate" | "advanced"
+            retrieve_only  (bool, optional) - If True, return raw chunks without LLM synthesis.
 
         Returns
         -------
         dict with keys: answer, citations, found, mode, caller, tool_calls_count
+             (retrieve_only adds: context — raw chunk text)
         """
         raw_prompt = payload.get("prompt", "")
         if not raw_prompt.strip():
@@ -185,6 +189,7 @@ class RagAgent:
         caller: str = payload.get("caller", "unknown")
         subject: str = payload.get("subject", "")
         level: str = payload.get("level", "intermediate")
+        retrieve_only: bool = payload.get("retrieve_only", False)
 
         # Dynamic mode detection — upgrade based on query phrasing (content callers only)
         if caller != "manager":
@@ -200,6 +205,14 @@ class RagAgent:
         # Manager caller → route to management tools
         if caller == "manager":
             return self._handle_manager(raw_prompt, mode, subject, payload)
+
+        # Retrieve-only mode — return raw chunks without LLM synthesis.
+        # Used by Professor/TA agents to get grounding context for their own
+        # LLM calls, avoiding double-LLM invocations.
+        if retrieve_only:
+            return self._handle_retrieve_only(
+                raw_prompt, mode, caller, subject, level, payload
+            )
 
         # Content callers (professor, ta, unknown) → retrieve then generate
         return self._handle_content(raw_prompt, mode, caller, subject, level, payload)
@@ -256,7 +269,7 @@ class RagAgent:
         # threshold, treat as not found so we fall through to web search.
         # In INTERNAL_ONLY mode, always trust KB results regardless of score.
         if mode == RagMode.EXTERNAL_OK and found and citations:
-            relevance_threshold = float(self.config.get("rag.relevance_threshold", 0.15))
+            relevance_threshold = float(self.config.get("rag.relevance_threshold", 0.25))
             best_score = max(c.get("score", 0) for c in citations)
             if best_score < relevance_threshold:
                 logger.info(
@@ -370,6 +383,119 @@ class RagAgent:
         return self._build_output(
             raw_answer, merged_citations, effective_found, mode, caller, tool_calls_count
         )
+
+    def _handle_retrieve_only(
+        self,
+        prompt: str,
+        mode: RagMode,
+        caller: str,
+        subject: str,
+        level: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return raw retrieved chunks + citations without LLM synthesis.
+
+        Used by calling agents (Professor, TA) that run their own LLM step
+        and only need the RAG Agent as a retrieval engine.
+        """
+        tool_calls_count = 0
+
+        # EXTERNAL_ONLY → web search only
+        if mode == RagMode.EXTERNAL_ONLY:
+            if self.exa_tool is None:
+                return {
+                    "context": "",
+                    "citations": [],
+                    "found": False,
+                    "mode": mode.value,
+                    "caller": caller,
+                    "tool_calls_count": 0,
+                }
+            try:
+                raw_web = self.exa_tool._run({
+                    "query": prompt,
+                    "caller": caller,
+                    "level": level,
+                    "subject": subject,
+                })
+                tool_calls_count += 1
+                web_result = json.loads(raw_web)
+                web_citations = web_result.get("web_citations", [])
+                for wc in web_citations:
+                    wc["source_type"] = "web"
+                return {
+                    "context": web_result.get("context", ""),
+                    "citations": web_citations,
+                    "found": web_result.get("found", False),
+                    "mode": mode.value,
+                    "caller": caller,
+                    "tool_calls_count": tool_calls_count,
+                }
+            except Exception as exc:
+                logger.error("Retrieve-only web search failed: %s", exc)
+                return self._error_response(f"Web search error: {exc}", payload)
+
+        # KB retrieval (INTERNAL_ONLY or EXTERNAL_OK)
+        search_query = self._enrich_query_for_search(prompt, caller)
+        top_k = int(self.config.get("rag.top_k", 5))
+        retrieval_input = {"query": search_query, "subject": subject, "top_k": top_k}
+
+        try:
+            raw_retrieval = self.retrieve_tool._run(retrieval_input)
+            tool_calls_count += 1
+            retrieval = json.loads(raw_retrieval)
+        except Exception as exc:
+            logger.error("Retrieve-only KB retrieval failed: %s", exc)
+            return self._error_response(f"Retrieval error: {exc}", payload)
+
+        found = retrieval.get("found", False)
+        context = retrieval.get("context", "")
+        citations = retrieval.get("citations", [])
+
+        # Relevance check for EXTERNAL_OK
+        if mode == RagMode.EXTERNAL_OK and found and citations:
+            threshold = float(self.config.get("rag.relevance_threshold", 0.25))
+            best_score = max(c.get("score", 0) for c in citations)
+            if best_score < threshold:
+                found = False
+
+        for c in citations:
+            c["source_type"] = "kb"
+
+        # If KB empty and EXTERNAL_OK → try web search
+        web_context = ""
+        web_citations: list[dict[str, Any]] = []
+        if not found and mode == RagMode.EXTERNAL_OK and self.exa_tool is not None:
+            citations = []
+            try:
+                raw_web = self.exa_tool._run({
+                    "query": prompt,
+                    "caller": caller,
+                    "level": level,
+                    "subject": subject,
+                })
+                tool_calls_count += 1
+                web_result = json.loads(raw_web)
+                if web_result.get("found", False):
+                    web_context = web_result.get("context", "")
+                    web_citations = web_result.get("web_citations", [])
+                    for wc in web_citations:
+                        wc["source_type"] = "web"
+            except Exception as exc:
+                logger.warning("Retrieve-only web fallback failed: %s", exc)
+
+        merged_context = context or web_context
+        merged_citations = citations + web_citations
+        effective_found = found or bool(web_citations)
+
+        return {
+            "context": merged_context,
+            "citations": merged_citations,
+            "found": effective_found,
+            "mode": mode.value,
+            "caller": caller,
+            "tool_calls_count": tool_calls_count,
+        }
 
     def _handle_manager(
         self,
@@ -591,35 +717,12 @@ class RagAgent:
 
     @staticmethod
     def _enrich_query_for_search(prompt: str, caller: str) -> str:
-        """Append lightweight caller-specific keywords for FAISS matching.
-
-        Unlike the verbose _enrich_query prefix, this just adds a few terms
-        to bias FAISS toward the right chunk type (concepts vs. problems)
-        without diluting the embedding with long instructional text.
-        """
+        """Append lightweight caller-specific keywords for FAISS matching."""
         if caller == "professor":
             return f"{prompt} concept explanation definition theory"
         elif caller == "ta":
             return f"{prompt} practice problems exercises solutions examples"
         return prompt
-
-    def _enrich_query(self, prompt: str, caller: str, subject: str) -> str:
-        """Add caller-specific context prefix (used for LLM prompting, not FAISS)."""
-        if caller == "professor":
-            prefix = (
-                "[Teaching Context] Retrieve comprehensive explanations, "
-                "definitions, examples, and lecture material.\n\n"
-            )
-        elif caller == "ta":
-            prefix = (
-                "[Practice Context] Retrieve problems, exercises, worked "
-                "examples, solution steps, and difficulty information.\n\n"
-            )
-        else:
-            return prompt
-
-        subject_hint = f"[Subject: {subject}] " if subject else ""
-        return f"{prefix}{subject_hint}{prompt}"
 
     def _build_output(
         self,

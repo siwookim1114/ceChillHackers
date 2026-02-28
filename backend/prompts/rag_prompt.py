@@ -1,4 +1,4 @@
-## Prompts for RAG prompt
+"""Prompt addendums for the RAG Agent — mode-specific and caller-specific."""
 
 
 _INTERNAL_ADDENDUM = """
