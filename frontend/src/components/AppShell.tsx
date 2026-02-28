@@ -9,6 +9,7 @@ type AppShellProps = {
   children: ReactNode;
   immersive?: boolean;
   hideContentHeader?: boolean;
+  topbarRevealOnHover?: boolean;
 };
 
 const NAV_ITEMS = [
@@ -26,7 +27,8 @@ export function AppShell({
   subtitle,
   children,
   immersive = false,
-  hideContentHeader = false
+  hideContentHeader = false,
+  topbarRevealOnHover = false
 }: AppShellProps) {
   const navigate = useNavigate();
   const [hideTopbar, setHideTopbar] = useState(false);
@@ -39,6 +41,7 @@ export function AppShell({
   const lastScrollYRef = useRef(0);
   const closeMenuTimerRef = useRef<number | null>(null);
   const closeImmersiveSidebarTimerRef = useRef<number | null>(null);
+  const topbarHoverTimerRef = useRef<number | null>(null);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const level = localStorage.getItem("preferred_level") ?? "Beginner";
   const authUser = getAuthUser();
@@ -109,7 +112,36 @@ export function AppShell({
     }, 120);
   };
 
+  const clearTopbarHoverTimer = () => {
+    if (topbarHoverTimerRef.current !== null) {
+      window.clearTimeout(topbarHoverTimerRef.current);
+      topbarHoverTimerRef.current = null;
+    }
+  };
+
+  const openTopbarByHover = () => {
+    if (!topbarRevealOnHover) {
+      return;
+    }
+    clearTopbarHoverTimer();
+    setHideTopbar(false);
+  };
+
+  const scheduleHideTopbarByHover = () => {
+    if (!topbarRevealOnHover) {
+      return;
+    }
+    clearTopbarHoverTimer();
+    topbarHoverTimerRef.current = window.setTimeout(() => {
+      setHideTopbar(true);
+      topbarHoverTimerRef.current = null;
+    }, 150);
+  };
+
   useEffect(() => {
+    if (topbarRevealOnHover) {
+      return;
+    }
     const onScroll = () => {
       const currentY = window.scrollY;
       const previousY = lastScrollYRef.current;
@@ -128,7 +160,15 @@ export function AppShell({
 
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [topbarRevealOnHover]);
+
+  useEffect(() => {
+    if (topbarRevealOnHover) {
+      setHideTopbar(true);
+      return;
+    }
+    setHideTopbar(false);
+  }, [topbarRevealOnHover]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", isDarkMode ? "dark" : "light");
@@ -155,6 +195,7 @@ export function AppShell({
     () => () => {
       clearCloseTimer();
       clearImmersiveSidebarTimer();
+      clearTopbarHoverTimer();
     },
     []
   );
@@ -169,6 +210,7 @@ export function AppShell({
   return (
     <div className={`dashboard-shell${immersive ? " immersive-shell" : ""}`}>
       {immersive && <div className="sidebar-hover-zone" onMouseEnter={openImmersiveSidebar} />}
+      {topbarRevealOnHover && <div className="topbar-hover-zone" onMouseEnter={openTopbarByHover} />}
       <aside
         className={`app-sidebar${immersive ? " immersive-sidebar" : ""}${immersive && immersiveSidebarOpen ? " floating-open" : ""}`}
         onMouseEnter={openImmersiveSidebar}
@@ -215,7 +257,11 @@ export function AppShell({
       </aside>
 
       <section className={`shell-main${immersive ? " immersive-main" : ""}`}>
-        <header className={`shell-topbar ${hideTopbar ? "topbar-hidden" : ""}`}>
+        <header
+          className={`shell-topbar ${hideTopbar ? "topbar-hidden" : ""}${topbarRevealOnHover ? " topbar-hover-mode" : ""}`}
+          onMouseEnter={openTopbarByHover}
+          onMouseLeave={scheduleHideTopbarByHover}
+        >
           <div className="topbar-left">
             <label className="search-wrap minimalist">
               <input placeholder="Search concepts, notes, mistakes..." />
@@ -349,7 +395,9 @@ export function AppShell({
           </div>
         </header>
 
-        <main className={`shell-content${hideContentHeader ? " no-header" : ""}`}>
+        <main
+          className={`shell-content${hideContentHeader ? " no-header" : ""}${topbarRevealOnHover ? " lecture-focus-content" : ""}`}
+        >
           {!hideContentHeader && (
             <div className="content-header">
               <h2>{title}</h2>

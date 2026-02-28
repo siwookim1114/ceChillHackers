@@ -62,6 +62,7 @@ export function SolvePage() {
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState<string | null>(null);
   const [lectureMuted, setLectureMuted] = useState(true);
+  const [isStageTransitioning, setIsStageTransitioning] = useState(false);
   const [signals, setSignals] = useState<StuckSignals>(INITIAL_SIGNALS);
   const [intervention, setIntervention] = useState<Intervention | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +72,19 @@ export function SolvePage() {
   const flushingRef = useRef(false);
   const lastActionRef = useRef(Date.now());
   const lectureVideoRef = useRef<HTMLVideoElement | null>(null);
+  const stageChangeTimerRef = useRef<number | null>(null);
+  const stageSettleTimerRef = useRef<number | null>(null);
+
+  const clearStageTimers = useCallback(() => {
+    if (stageChangeTimerRef.current !== null) {
+      window.clearTimeout(stageChangeTimerRef.current);
+      stageChangeTimerRef.current = null;
+    }
+    if (stageSettleTimerRef.current !== null) {
+      window.clearTimeout(stageSettleTimerRef.current);
+      stageSettleTimerRef.current = null;
+    }
+  }, []);
 
   const enqueueEvent = useCallback((event: ClientEvent) => {
     const stamped = { ...event, ts: new Date().toISOString() };
@@ -160,8 +174,29 @@ export function SolvePage() {
       if (uploadedPreviewUrl) {
         URL.revokeObjectURL(uploadedPreviewUrl);
       }
+      clearStageTimers();
     };
-  }, [uploadedPreviewUrl]);
+  }, [clearStageTimers, uploadedPreviewUrl]);
+
+  const transitionToStage = useCallback(
+    (nextStage: SolveStage) => {
+      if (nextStage === stage || isStageTransitioning) {
+        return;
+      }
+      setError(null);
+      clearStageTimers();
+      setIsStageTransitioning(true);
+      stageChangeTimerRef.current = window.setTimeout(() => {
+        setStage(nextStage);
+        stageChangeTimerRef.current = null;
+        stageSettleTimerRef.current = window.setTimeout(() => {
+          setIsStageTransitioning(false);
+          stageSettleTimerRef.current = null;
+        }, 220);
+      }, 160);
+    },
+    [clearStageTimers, isStageTransitioning, stage]
+  );
 
   const onWorkChange = (value: string) => {
     setWorkText(value);
@@ -237,7 +272,7 @@ export function SolvePage() {
 
   const submitAnswer = async () => {
     if (!uploadedFileName) {
-      setError("먼저 풀이 이미지나 파일을 업로드해 주세요.");
+      setError("Please upload your solved work image or file first.");
       return;
     }
     enqueueEvent({
@@ -277,30 +312,79 @@ export function SolvePage() {
       title={attempt.problem.title}
       subtitle={`Unit: ${attempt.problem.unit}`}
       immersive={stage !== "ready"}
-      hideContentHeader={stage !== "ready"}
+      hideContentHeader
+      topbarRevealOnHover={stage === "lecture"}
     >
+      <div className={`stage-transition-frame${isStageTransitioning ? " switching" : ""}`}>
       {stage === "ready" && (
-        <section className="panel-card lecture-launch">
-          <p className="overline">Lesson Setup</p>
-          <h3>{attempt.problem.title}</h3>
-          <p>
-            강의를 먼저 시작하면 아바타가 핵심 개념을 설명하고, 종료 후에는 좌측 아바타 +
-            우측 스케치 보드 화면으로 전환됩니다.
-          </p>
-          <div className="problem-statement">{attempt.problem.prompt}</div>
-          <div className="entry-cta-row">
-            <button className="btn-primary" onClick={() => setStage("lecture")} type="button">
-              Start Lecture
-            </button>
-            <button className="btn-muted" onClick={() => setStage("solve")} type="button">
-              Skip to Solving
-            </button>
+        <section className="panel-card lecture-launch stage-enter">
+          <div className="lesson-setup-grid">
+            <div className="lesson-setup-main">
+              <p className="overline">Lesson Setup</p>
+              <h3>{attempt.problem.title}</h3>
+              <p>
+                The avatar lecture explains the core concept first, then automatically
+                switches to a split layout with tutor on the left and sketch board on the right.
+              </p>
+
+              <div className="lesson-meta-row">
+                <span className="lesson-meta-chip">Unit: {attempt.problem.unit}</span>
+                <span className="lesson-meta-chip">Lecture first</span>
+                <span className="lesson-meta-chip">Upload-based solving</span>
+              </div>
+
+              <div className="lesson-setup-flow">
+                <div className="flow-step">
+                  <strong>1</strong>
+                  <span>Start Lecture</span>
+                </div>
+                <div className="flow-step">
+                  <strong>2</strong>
+                  <span>Watch tutor guidance</span>
+                </div>
+                <div className="flow-step">
+                  <strong>3</strong>
+                  <span>Upload your solved work</span>
+                </div>
+              </div>
+
+              <div className="lesson-actions">
+                <button
+                  className="btn-primary"
+                  disabled={isStageTransitioning}
+                  onClick={() => transitionToStage("lecture")}
+                  type="button"
+                >
+                  Start Lecture
+                </button>
+                <button
+                  className="btn-muted"
+                  disabled={isStageTransitioning}
+                  onClick={() => transitionToStage("solve")}
+                  type="button"
+                >
+                  Skip to Solving
+                </button>
+              </div>
+            </div>
+
+            <aside className="lesson-preview-card">
+              <p className="overline">Problem Preview</p>
+              <div className="problem-statement">{attempt.problem.prompt}</div>
+              <div className="lesson-preview-note">
+                <strong>After lecture</strong>
+                <p>
+                  The avatar view shrinks to the left, and the solved-work upload board appears
+                  on the right.
+                </p>
+              </div>
+            </aside>
           </div>
         </section>
       )}
 
       {stage === "lecture" && (
-        <section className="panel-card lecture-stage">
+        <section className="panel-card lecture-stage lecture-stage-full stage-enter">
           <div className="lecture-video-wrap">
             <video
               autoPlay
@@ -329,7 +413,12 @@ export function SolvePage() {
             <h3>{attempt.problem.title}</h3>
             <p>{attempt.problem.prompt}</p>
             <div className="entry-cta-row">
-              <button className="btn-primary" onClick={() => setStage("solve")} type="button">
+              <button
+                className="btn-primary"
+                disabled={isStageTransitioning}
+                onClick={() => transitionToStage("solve")}
+                type="button"
+              >
                 End Lecture and Open Sketch Board
               </button>
             </div>
@@ -338,7 +427,7 @@ export function SolvePage() {
       )}
 
       {stage === "solve" && (
-        <div className="solve-lesson-grid">
+        <div className="solve-lesson-grid stage-enter">
           <section className="panel-card solve-lesson-split">
             <div className="solve-lesson-left">
               <div className="lecture-mini">
@@ -357,11 +446,18 @@ export function SolvePage() {
               <div className="problem-header">
                 <p className="overline">Tutor Summary</p>
                 <h3>{attempt.problem.title}</h3>
-                <p className="muted">좌측은 강의 요약, 우측은 학생 풀이 업로드 영역입니다.</p>
+                <p className="muted">
+                  Left side shows tutor summary, right side is the student upload workspace.
+                </p>
               </div>
               <div className="problem-statement">{attempt.problem.prompt}</div>
               <div className="action-row">
-                <button className="btn-muted" onClick={() => setStage("lecture")} type="button">
+                <button
+                  className="btn-muted"
+                  disabled={isStageTransitioning}
+                  onClick={() => transitionToStage("lecture")}
+                  type="button"
+                >
                   Replay Lecture
                 </button>
                 <button className="btn-teal" onClick={requestHint} type="button">
@@ -441,6 +537,11 @@ export function SolvePage() {
           </div>
         </div>
       )}
+        <div
+          aria-hidden="true"
+          className={`stage-transition-overlay${isStageTransitioning ? " show" : ""}`}
+        />
+      </div>
     </AppShell>
   );
 }
