@@ -1,0 +1,17 @@
+problem:
+{{PROBLEM_TEXT}}
+
+student_work (summary):
+{{STUDENT_WORK_SUMMARY}}
+
+stuck_signals:
+- idle_ms: {{IDLE_MS}}
+- erase_count_delta: {{ERASE_DELTA}}
+- repeated_error_count: {{REPEAT_ERR}}
+- stuck_score: {{STUCK_SCORE}}
+
+hint_level:
+{{HINT_LEVEL}}
+
+retrieved_context (optional, only if internal RAG is enabled):
+{{RAG_SNIPPETS_WITH_CITATIONS}}

@@ -1,0 +1,69 @@
+export type Problem = {
+  id: string;
+  title: string;
+  prompt: string;
+  answer_key: string;
+  unit: string;
+};
+
+export type Attempt = {
+  attempt_id: string;
+  started_at: string;
+  solved_at: string | null;
+  problem: Problem;
+};
+
+export type AttemptCreateResponse = {
+  attempt_id: string;
+  started_at: string;
+  problem: Problem;
+};
+
+export type EventType =
+  | "stroke_add"
+  | "stroke_erase"
+  | "idle_ping"
+  | "hint_request"
+  | "answer_submit";
+
+export type ClientEvent = {
+  type: EventType;
+  ts?: string;
+  payload?: Record<string, unknown>;
+};
+
+export type StuckSignals = {
+  idle_ms: number;
+  erase_count_delta: number;
+  repeated_error_count: number;
+  stuck_score: number;
+};
+
+export type Intervention = {
+  level: 1 | 2 | 3;
+  reason: string;
+  tutor_message: string;
+  created_at: string;
+};
+
+export type EventBatchResponse = {
+  accepted: number;
+  stuck_signals: StuckSignals;
+  intervention: Intervention | null;
+  solved: boolean;
+};
+
+export type Summary = {
+  attempt_id: string;
+  metrics: {
+    time_to_solve_sec: number | null;
+    max_stuck: number;
+    hint_max_level: number;
+    erase_count: number;
+  };
+  timeline: Array<{
+    at: string;
+    type: string;
+    label: string;
+  }>;
+};

@@ -1,0 +1,305 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700&display=swap");
+
+:root {
+  --bg: #f3ede3;
+  --bg-2: #f8f4ee;
+  --ink: #172329;
+  --muted: #4e5a60;
+  --accent: #d4632f;
+  --accent-2: #1f7a74;
+  --card: rgba(255, 255, 255, 0.74);
+  --border: rgba(23, 35, 41, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% 15%, rgba(212, 99, 47, 0.25), transparent 35%),
+    radial-gradient(circle at 85% 8%, rgba(31, 122, 116, 0.24), transparent 45%),
+    linear-gradient(130deg, var(--bg), var(--bg-2));
+  color: var(--ink);
+  font-family: "Space Grotesk", "Noto Sans KR", sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+.page {
+  width: min(1100px, 92vw);
+  margin: 32px auto;
+  animation: rise 0.45s ease-out;
+}
+
+.page-entry {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 64px);
+}
+
+.hero,
+.card {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 28px;
+  background: var(--card);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 18px 48px rgba(23, 35, 41, 0.08);
+}
+
+.hero {
+  max-width: 760px;
+  text-align: center;
+  display: grid;
+  gap: 16px;
+}
+
+.hero h1 {
+  font-size: clamp(2rem, 3.2vw, 2.8rem);
+  line-height: 1.05;
+}
+
+.overline {
+  letter-spacing: 0.14em;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  font-size: 0.95rem;
+}
+
+select,
+input,
+textarea {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.btn-primary,
+.btn-muted {
+  border: none;
+  border-radius: 999px;
+  padding: 11px 16px;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(90deg, var(--accent), #df8447);
+  color: #fff;
+}
+
+.btn-muted {
+  background: rgba(23, 35, 41, 0.09);
+  color: var(--ink);
+}
+
+.btn-primary:hover,
+.btn-muted:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+.problem-list {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.problem-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.solve-layout {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 16px;
+}
+
+.workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.prompt {
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.panel {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.85);
+  padding: 16px;
+}
+
+.coach-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.level-0 {
+  background: rgba(23, 35, 41, 0.1);
+}
+
+.level-1 {
+  background: rgba(31, 122, 116, 0.22);
+}
+
+.level-2 {
+  background: rgba(212, 99, 47, 0.28);
+}
+
+.level-3 {
+  background: rgba(194, 58, 0, 0.25);
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.dot.ok {
+  background: #2f8e54;
+}
+
+.dot.warn {
+  background: #cc4e1c;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-grid > div,
+.metric-grid > article {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.metric-grid small {
+  color: var(--muted);
+}
+
+.metric-grid strong {
+  font-size: 1.25rem;
+}
+
+.hint-box {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.timeline {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.timeline li {
+  border-left: 3px solid var(--accent-2);
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.timeline span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.error {
+  color: #9f2200;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 900px) {
+  .solve-layout {
+    grid-template-columns: 1fr;
+  }
+}
