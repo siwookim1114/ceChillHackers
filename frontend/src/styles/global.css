@@ -1143,6 +1143,39 @@ label {
     0 5px 12px rgba(37, 99, 235, 0.08);
 }
 
+.dashboard-shell.immersive-shell {
+  grid-template-columns: 1fr;
+  padding: 12px;
+}
+
+.sidebar-hover-zone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 20px;
+  height: 100vh;
+  z-index: 38;
+}
+
+.app-sidebar.immersive-sidebar {
+  position: fixed;
+  top: 16px;
+  left: 12px;
+  width: 272px;
+  height: calc(100vh - 32px);
+  z-index: 39;
+  transform: translateX(-115%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.app-sidebar.immersive-sidebar.floating-open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .brand-block {
   display: flex;
   gap: 12px;
@@ -1334,6 +1367,10 @@ label {
   grid-template-rows: auto 1fr;
   min-width: 0;
   background: transparent;
+}
+
+.shell-main.immersive-main {
+  grid-column: 1 / -1;
 }
 
 .shell-topbar {
@@ -1610,6 +1647,10 @@ label {
   gap: 16px;
   width: min(1240px, 100%);
   margin: 0 auto;
+}
+
+.shell-content.no-header {
+  padding-top: 6px;
 }
 
 .content-header h2 {
@@ -2658,6 +2699,141 @@ label {
   gap: 12px;
 }
 
+.lecture-launch {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+}
+
+.lecture-launch h3 {
+  font-family: "Sora", sans-serif;
+  font-size: 1.35rem;
+}
+
+.lecture-launch p {
+  color: #475569;
+  line-height: 1.5;
+}
+
+.lecture-stage {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 14px;
+  border-radius: 26px;
+}
+
+.lecture-video-wrap {
+  position: relative;
+  border-radius: 20px;
+  overflow: hidden;
+  min-height: 520px;
+}
+
+.lecture-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.lecture-copy {
+  display: grid;
+  gap: 10px;
+  align-content: center;
+}
+
+.lecture-copy h3 {
+  font-family: "Sora", sans-serif;
+  font-size: 1.6rem;
+}
+
+.lecture-copy p {
+  color: #475569;
+  line-height: 1.55;
+}
+
+.solve-lesson-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.solve-lesson-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.solve-lesson-left,
+.solve-lesson-right {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.lecture-mini {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid #bfdbfe;
+  min-height: 230px;
+  background: #0f172a;
+}
+
+.lecture-mini-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.upload-dropzone {
+  border: 1px dashed #93c5fd;
+  border-radius: 14px;
+  background: #f8fbff;
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.upload-dropzone strong {
+  color: #1e3a8a;
+  font-size: 0.92rem;
+}
+
+.upload-dropzone small {
+  color: #64748b;
+  margin-top: 4px;
+  line-height: 1.45;
+  font-size: 0.8rem;
+}
+
+.upload-input {
+  display: none;
+}
+
+.upload-preview-image {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 12px;
+  border: 1px solid #dbeafe;
+  background: #fff;
+}
+
+.action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.solve-lesson-grid > .panel-card > .coach-panel {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
 .workspace {
   display: grid;
   gap: 11px;
@@ -3410,6 +3586,30 @@ label {
   color: #fdba74;
 }
 
+:root[data-theme="dark"] .lecture-launch p,
+:root[data-theme="dark"] .lecture-copy p,
+:root[data-theme="dark"] .upload-dropzone small {
+  color: #94a3b8;
+}
+
+:root[data-theme="dark"] .lecture-mini {
+  border-color: #36598b;
+}
+
+:root[data-theme="dark"] .upload-dropzone {
+  background: #132238;
+  border-color: #36598b;
+}
+
+:root[data-theme="dark"] .upload-dropzone strong {
+  color: #bfdbfe;
+}
+
+:root[data-theme="dark"] .upload-preview-image {
+  border-color: #2a3b59;
+  background: #0f172a;
+}
+
 :root[data-theme="dark"] .skeleton-line,
 :root[data-theme="dark"] .skeleton-pill,
 :root[data-theme="dark"] .skeleton-block {
@@ -3428,6 +3628,18 @@ label {
 }
 
 @media (max-width: 1180px) {
+  .lecture-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .solve-lesson-split {
+    grid-template-columns: 1fr;
+  }
+
+  .lecture-video-wrap {
+    min-height: 360px;
+  }
+
   .skeleton-grid-4 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3452,6 +3664,20 @@ label {
 }
 
 @media (max-width: 960px) {
+  .sidebar-hover-zone {
+    display: none;
+  }
+
+  .app-sidebar.immersive-sidebar,
+  .app-sidebar.immersive-sidebar.floating-open {
+    position: static;
+    width: auto;
+    height: auto;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
   .auth-plain-container {
     height: auto;
     padding: 12px 0;
@@ -3582,6 +3808,14 @@ label {
 }
 
 @media (max-width: 640px) {
+  .lecture-video-wrap {
+    min-height: 260px;
+  }
+
+  .lecture-mini {
+    min-height: 180px;
+  }
+
   .session-skeleton {
     min-height: 200px;
   }

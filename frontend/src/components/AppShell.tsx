@@ -7,6 +7,8 @@ type AppShellProps = {
   title: ReactNode;
   subtitle: ReactNode;
   children: ReactNode;
+  immersive?: boolean;
+  hideContentHeader?: boolean;
 };
 
 const NAV_ITEMS = [
@@ -19,16 +21,24 @@ const NAV_ITEMS = [
   { label: "Settings", to: "/settings", icon: "nav-settings" as AppIconName }
 ];
 
-export function AppShell({ title, subtitle, children }: AppShellProps) {
+export function AppShell({
+  title,
+  subtitle,
+  children,
+  immersive = false,
+  hideContentHeader = false
+}: AppShellProps) {
   const navigate = useNavigate();
   const [hideTopbar, setHideTopbar] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [immersiveSidebarOpen, setImmersiveSidebarOpen] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(
     () => localStorage.getItem("theme_mode") === "dark"
   );
   const lastScrollYRef = useRef(0);
   const closeMenuTimerRef = useRef<number | null>(null);
+  const closeImmersiveSidebarTimerRef = useRef<number | null>(null);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const level = localStorage.getItem("preferred_level") ?? "Beginner";
   const authUser = getAuthUser();
@@ -71,6 +81,32 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
       setProfileMenuOpen(false);
       closeMenuTimerRef.current = null;
     }, 180);
+  };
+
+  const clearImmersiveSidebarTimer = () => {
+    if (closeImmersiveSidebarTimerRef.current !== null) {
+      window.clearTimeout(closeImmersiveSidebarTimerRef.current);
+      closeImmersiveSidebarTimerRef.current = null;
+    }
+  };
+
+  const openImmersiveSidebar = () => {
+    if (!immersive) {
+      return;
+    }
+    clearImmersiveSidebarTimer();
+    setImmersiveSidebarOpen(true);
+  };
+
+  const scheduleCloseImmersiveSidebar = () => {
+    if (!immersive) {
+      return;
+    }
+    clearImmersiveSidebarTimer();
+    closeImmersiveSidebarTimerRef.current = window.setTimeout(() => {
+      setImmersiveSidebarOpen(false);
+      closeImmersiveSidebarTimerRef.current = null;
+    }, 120);
   };
 
   useEffect(() => {
@@ -118,13 +154,26 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
   useEffect(
     () => () => {
       clearCloseTimer();
+      clearImmersiveSidebarTimer();
     },
     []
   );
 
+  useEffect(() => {
+    if (!immersive) {
+      setImmersiveSidebarOpen(false);
+      clearImmersiveSidebarTimer();
+    }
+  }, [immersive]);
+
   return (
-    <div className="dashboard-shell">
-      <aside className="app-sidebar">
+    <div className={`dashboard-shell${immersive ? " immersive-shell" : ""}`}>
+      {immersive && <div className="sidebar-hover-zone" onMouseEnter={openImmersiveSidebar} />}
+      <aside
+        className={`app-sidebar${immersive ? " immersive-sidebar" : ""}${immersive && immersiveSidebarOpen ? " floating-open" : ""}`}
+        onMouseEnter={openImmersiveSidebar}
+        onMouseLeave={scheduleCloseImmersiveSidebar}
+      >
         <div className="brand-block">
           <div className="brand-mark">TC</div>
           <div>
@@ -165,7 +214,7 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
         </button>
       </aside>
 
-      <section className="shell-main">
+      <section className={`shell-main${immersive ? " immersive-main" : ""}`}>
         <header className={`shell-topbar ${hideTopbar ? "topbar-hidden" : ""}`}>
           <div className="topbar-left">
             <label className="search-wrap minimalist">
@@ -300,11 +349,13 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
           </div>
         </header>
 
-        <main className="shell-content">
-          <div className="content-header">
-            <h2>{title}</h2>
-            <p>{subtitle}</p>
-          </div>
+        <main className={`shell-content${hideContentHeader ? " no-header" : ""}`}>
+          {!hideContentHeader && (
+            <div className="content-header">
+              <h2>{title}</h2>
+              <p>{subtitle}</p>
+            </div>
+          )}
           {children}
         </main>
       </section>
