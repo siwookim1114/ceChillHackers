@@ -1,0 +1,11 @@
+{
+  "session_id": "session-001",
+  "message": "I keep mixing up derivatives and slopes. Can you guide me?",
+  "topic": "calculus",
+  "mode": "strict",
+  "profile": {
+    "level": "beginner",
+    "learning_style": "mixed",
+    "pace": "medium"
+  }
+}

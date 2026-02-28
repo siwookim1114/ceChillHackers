@@ -1,0 +1,70 @@
+{
+  "request_id": "solve-001",
+  "attempt_id": "attempt-777",
+  "mode": "internal_only",
+  "overall_verdict": "partial",
+  "partial_score": {
+    "earned_points": 6,
+    "max_points": 10,
+    "percent": 60
+  },
+  "step_verdicts": [
+    {
+      "step_index": 1,
+      "verdict": "ok",
+      "message": "Outer-inner identification is correct.",
+      "rubric_criterion_ids": [
+        "identify_outer_inner"
+      ],
+      "error_tags": [],
+      "awarded_points": 2
+    },
+    {
+      "step_index": 2,
+      "verdict": "issue",
+      "message": "Chain rule is incomplete because inner derivative 6x is missing.",
+      "rubric_criterion_ids": [
+        "apply_chain_rule"
+      ],
+      "error_tags": [
+        "PROCEDURE_SLIP",
+        "JUSTIFICATION_MISSING"
+      ],
+      "awarded_points": 2
+    },
+    {
+      "step_index": 3,
+      "verdict": "issue",
+      "message": "Final answer inherits the missing inner derivative.",
+      "rubric_criterion_ids": [
+        "final_simplification"
+      ],
+      "error_tags": [
+        "CALCULATION_ERROR"
+      ],
+      "awarded_points": 2
+    }
+  ],
+  "corrections": [
+    "Multiply by derivative of inner function: d/dx(3x^2+1)=6x.",
+    "Correct final form: 24x(3x^2+1)^3."
+  ],
+  "missing_justification_flags": [
+    "Did not justify where the inner derivative factor came from."
+  ],
+  "detected_error_tags": [
+    "PROCEDURE_SLIP",
+    "CALCULATION_ERROR",
+    "JUSTIFICATION_MISSING"
+  ],
+  "recommended_next_action": "request_hint",
+  "feedback_message": "You identified the right method, but chain rule needs the inner derivative factor to complete the reasoning.",
+  "citations": [
+    {
+      "source_id": "kb-lecture-derivatives-week3",
+      "title": "Calculus Week 3 Notes",
+      "snippet": "Chain rule requires multiplying by derivative of the inner function.",
+      "location": "p.12"
+    }
+  ]
+}
