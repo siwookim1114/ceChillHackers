@@ -145,9 +145,9 @@ export function LoginPage() {
           </button>
 
           <nav className="entry-nav-links">
-            <a href="/home">Practice</a>
-            <a href="/home#create-course">Create Course</a>
-            <a href="/home#results">Session Results</a>
+            <a href="/practice">Practice</a>
+            <a href="/practice#create-course">Create Course</a>
+            <a href="/progress">Session Results</a>
             <a href="/home">AI Coach</a>
           </nav>
 
