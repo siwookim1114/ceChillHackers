@@ -102,3 +102,40 @@ export type DailyProgressEventType =
   | "course_created"
   | "coached_session"
   | "set_current_topic";
+
+export type CourseFolder = {
+  id: string;
+  title: string;
+  syllabus: string | null;
+  lecture_count: number;
+  file_count: number;
+  created_at: string;
+};
+
+export type LectureFileInfo = {
+  id: string;
+  file_name: string;
+  content_type: string | null;
+  size_bytes: number;
+  created_at: string;
+};
+
+export type LectureItem = {
+  id: string;
+  title: string;
+  description: string | null;
+  problem_prompt: string;
+  answer_key: string;
+  sort_order: number;
+  file_count: number;
+  created_at: string;
+  files: LectureFileInfo[];
+};
+
+export type CourseDetail = {
+  id: string;
+  title: string;
+  syllabus: string | null;
+  created_at: string;
+  lectures: LectureItem[];
+};

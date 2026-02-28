@@ -5,10 +5,14 @@ import type {
   AuthResponse,
   AuthUser,
   ClientEvent,
+  CourseDetail,
+  CourseFolder,
   DailyProgress,
   DailyProgressEventType,
   EventBatchResponse,
   Intervention,
+  LectureFileInfo,
+  LectureItem,
   LearningPace,
   LearningStyle,
   Problem,
@@ -36,7 +40,8 @@ function parseErrorText(raw: string): string {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getAccessToken();
   const headers = new Headers(options?.headers ?? {});
-  if (!headers.has("Content-Type")) {
+  const isFormDataBody = options?.body instanceof FormData;
+  if (!isFormDataBody && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   if (token && !headers.has("Authorization")) {
@@ -85,6 +90,19 @@ export type DailyProgressEventPayload = {
   topic?: string;
 };
 
+export type CreateCoursePayload = {
+  title: string;
+  syllabus?: string;
+};
+
+export type CreateLecturePayload = {
+  title: string;
+  description?: string;
+  problem_prompt: string;
+  answer_key: string;
+  sort_order?: number;
+};
+
 export function signup(payload: SignupPayload) {
   return request<AuthResponse>("/api/auth/signup", {
     method: "POST",
@@ -114,6 +132,45 @@ export function getMeWithToken(accessToken: string) {
 export function getGoogleAuthStartUrl(returnTo: string) {
   const params = new URLSearchParams({ return_to: returnTo });
   return `${API_URL}/api/auth/google/start?${params.toString()}`;
+}
+
+export function listCourses() {
+  return request<CourseFolder[]>("/api/courses");
+}
+
+export function createCourse(payload: CreateCoursePayload) {
+  return request<CourseFolder>("/api/courses", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getCourseDetail(courseId: string) {
+  return request<CourseDetail>(`/api/courses/${courseId}`);
+}
+
+export function listCourseLectures(courseId: string) {
+  return request<LectureItem[]>(`/api/courses/${courseId}/lectures`);
+}
+
+export function createLecture(courseId: string, payload: CreateLecturePayload) {
+  return request<LectureItem>(`/api/courses/${courseId}/lectures`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function listLectureFiles(courseId: string, lectureId: string) {
+  return request<LectureFileInfo[]>(`/api/courses/${courseId}/lectures/${lectureId}/files`);
+}
+
+export function uploadLectureFile(courseId: string, lectureId: string, file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request<LectureFileInfo>(`/api/courses/${courseId}/lectures/${lectureId}/files`, {
+    method: "POST",
+    body: formData
+  });
 }
 
 export function listProblems() {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import base64
 import hashlib
@@ -16,7 +17,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -69,6 +70,8 @@ GOOGLE_REDIRECT_URI = os.getenv(
 ).strip()
 OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", "600"))
 GOOGLE_OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI)
+DB_READY = False
+logger = logging.getLogger(__name__)
 
 
 def utcnow() -> datetime:
@@ -403,6 +406,56 @@ class DailyProgressEventRequest(BaseModel):
     topic: Optional[str] = None
 
 
+class CourseCreateRequest(BaseModel):
+    title: str
+    syllabus: Optional[str] = None
+
+
+class LectureCreateRequest(BaseModel):
+    title: str
+    description: Optional[str] = None
+    problem_prompt: str
+    answer_key: str
+    sort_order: Optional[int] = None
+
+
+class LectureFileInfo(BaseModel):
+    id: str
+    file_name: str
+    content_type: Optional[str] = None
+    size_bytes: int
+    created_at: datetime
+
+
+class LectureItem(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    problem_prompt: str
+    answer_key: str
+    sort_order: int
+    file_count: int
+    created_at: datetime
+    files: List[LectureFileInfo] = Field(default_factory=list)
+
+
+class CourseFolder(BaseModel):
+    id: str
+    title: str
+    syllabus: Optional[str] = None
+    lecture_count: int
+    file_count: int
+    created_at: datetime
+
+
+class CourseDetailResponse(BaseModel):
+    id: str
+    title: str
+    syllabus: Optional[str] = None
+    created_at: datetime
+    lectures: List[LectureItem] = Field(default_factory=list)
+
+
 EventType = Literal[
     "stroke_add",
     "stroke_erase",
@@ -732,6 +785,46 @@ CREATE TABLE IF NOT EXISTS user_daily_progress_events (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_daily_progress_events_dedup
   ON user_daily_progress_events(user_id, progress_date, event_type, attempt_id);
+
+CREATE TABLE IF NOT EXISTS courses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  syllabus TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_courses_user_created
+  ON courses(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS lectures (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  problem_prompt TEXT NOT NULL,
+  answer_key TEXT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lectures_course_sort
+  ON lectures(course_id, sort_order, created_at);
+
+CREATE TABLE IF NOT EXISTS lecture_files (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lecture_id UUID NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  content_type TEXT,
+  size_bytes INT NOT NULL,
+  file_data BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lecture_files_lecture_created
+  ON lecture_files(lecture_id, created_at DESC);
 """
 
 
@@ -758,11 +851,26 @@ def init_auth_schema() -> None:
 
 
 def require_db_enabled() -> None:
+    global DB_READY
     if not DB_ENABLED:
         raise HTTPException(
             status_code=503,
             detail="Auth requires DATABASE_URL. Configure shared PostgreSQL first.",
         )
+    if DB_READY:
+        return
+    try:
+        init_db_schema()
+        init_auth_schema()
+        DB_READY = True
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database is temporarily unavailable. Check DATABASE_URL, RDS public access, "
+                "security group inbound 5432, and SSL settings."
+            ),
+        ) from exc
 
 
 def normalize_email(email: str) -> str:
@@ -1125,6 +1233,329 @@ def record_daily_progress_event_db(
     return daily_progress_from_row(row)
 
 
+def course_folder_from_row(row: dict[str, Any]) -> CourseFolder:
+    return CourseFolder(
+        id=str(row["id"]),
+        title=row["title"],
+        syllabus=row.get("syllabus"),
+        lecture_count=int(row.get("lecture_count") or 0),
+        file_count=int(row.get("file_count") or 0),
+        created_at=ensure_utc(row["created_at"]),
+    )
+
+
+def lecture_file_from_row(row: dict[str, Any]) -> LectureFileInfo:
+    return LectureFileInfo(
+        id=str(row["id"]),
+        file_name=row["file_name"],
+        content_type=row.get("content_type"),
+        size_bytes=int(row["size_bytes"] or 0),
+        created_at=ensure_utc(row["created_at"]),
+    )
+
+
+def lecture_item_from_row(
+    row: dict[str, Any], files: Optional[List[LectureFileInfo]] = None
+) -> LectureItem:
+    return LectureItem(
+        id=str(row["id"]),
+        title=row["title"],
+        description=row.get("description"),
+        problem_prompt=row["problem_prompt"],
+        answer_key=row["answer_key"],
+        sort_order=int(row.get("sort_order") or 0),
+        file_count=int(row.get("file_count") or 0),
+        created_at=ensure_utc(row["created_at"]),
+        files=files or [],
+    )
+
+
+def get_course_row_for_user_db(user_id: str, course_id: str) -> dict[str, Any]:
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, title, syllabus, created_at
+                FROM courses
+                WHERE id = %s::uuid AND user_id = %s::uuid
+                """,
+                (course_id, user_id),
+            )
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Course not found")
+    return row
+
+
+def list_courses_db(user_id: str) -> List[CourseFolder]:
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  c.id,
+                  c.title,
+                  c.syllabus,
+                  c.created_at,
+                  (
+                    SELECT COUNT(*)
+                    FROM lectures l
+                    WHERE l.course_id = c.id
+                  ) AS lecture_count,
+                  (
+                    SELECT COUNT(*)
+                    FROM lecture_files lf
+                    JOIN lectures l2 ON l2.id = lf.lecture_id
+                    WHERE l2.course_id = c.id
+                  ) AS file_count
+                FROM courses c
+                WHERE c.user_id = %s::uuid
+                ORDER BY c.created_at DESC
+                """,
+                (user_id,),
+            )
+            rows = cur.fetchall()
+    return [course_folder_from_row(row) for row in rows]
+
+
+def create_course_db(user_id: str, payload: CourseCreateRequest) -> CourseFolder:
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Course title is required")
+    syllabus = (payload.syllabus or "").strip() or None
+
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO courses (user_id, title, syllabus)
+                VALUES (%s::uuid, %s, %s)
+                RETURNING id, title, syllabus, created_at
+                """,
+                (user_id, title, syllabus),
+            )
+            row = cur.fetchone()
+        conn.commit()
+
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to create course")
+    return course_folder_from_row(
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "syllabus": row.get("syllabus"),
+            "created_at": row["created_at"],
+            "lecture_count": 0,
+            "file_count": 0,
+        }
+    )
+
+
+def list_lecture_files_db(user_id: str, course_id: str, lecture_id: str) -> List[LectureFileInfo]:
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT l.id
+                FROM lectures l
+                JOIN courses c ON c.id = l.course_id
+                WHERE c.user_id = %s::uuid
+                  AND c.id = %s::uuid
+                  AND l.id = %s::uuid
+                """,
+                (user_id, course_id, lecture_id),
+            )
+            lecture_row = cur.fetchone()
+            if not lecture_row:
+                raise HTTPException(status_code=404, detail="Lecture not found")
+
+            cur.execute(
+                """
+                SELECT id, file_name, content_type, size_bytes, created_at
+                FROM lecture_files
+                WHERE lecture_id = %s::uuid
+                ORDER BY created_at DESC
+                """,
+                (lecture_id,),
+            )
+            file_rows = cur.fetchall()
+
+    return [lecture_file_from_row(row) for row in file_rows]
+
+
+def list_course_lectures_db(
+    user_id: str, course_id: str, include_files: bool = False
+) -> List[LectureItem]:
+    get_course_row_for_user_db(user_id, course_id)
+
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  l.id,
+                  l.title,
+                  l.description,
+                  l.problem_prompt,
+                  l.answer_key,
+                  l.sort_order,
+                  l.created_at,
+                  (
+                    SELECT COUNT(*)
+                    FROM lecture_files lf
+                    WHERE lf.lecture_id = l.id
+                  ) AS file_count
+                FROM lectures l
+                WHERE l.course_id = %s::uuid
+                ORDER BY l.sort_order ASC, l.created_at ASC
+                """,
+                (course_id,),
+            )
+            lecture_rows = cur.fetchall()
+
+            lecture_items: List[LectureItem] = []
+            for row in lecture_rows:
+                files: List[LectureFileInfo] = []
+                if include_files:
+                    cur.execute(
+                        """
+                        SELECT id, file_name, content_type, size_bytes, created_at
+                        FROM lecture_files
+                        WHERE lecture_id = %s::uuid
+                        ORDER BY created_at DESC
+                        """,
+                        (row["id"],),
+                    )
+                    file_rows = cur.fetchall()
+                    files = [lecture_file_from_row(file_row) for file_row in file_rows]
+                lecture_items.append(lecture_item_from_row(row, files=files))
+
+    return lecture_items
+
+
+def get_course_detail_db(user_id: str, course_id: str) -> CourseDetailResponse:
+    course_row = get_course_row_for_user_db(user_id, course_id)
+    lectures = list_course_lectures_db(user_id, course_id, include_files=True)
+    return CourseDetailResponse(
+        id=str(course_row["id"]),
+        title=course_row["title"],
+        syllabus=course_row.get("syllabus"),
+        created_at=ensure_utc(course_row["created_at"]),
+        lectures=lectures,
+    )
+
+
+def create_lecture_db(user_id: str, course_id: str, payload: LectureCreateRequest) -> LectureItem:
+    get_course_row_for_user_db(user_id, course_id)
+
+    title = payload.title.strip()
+    problem_prompt = payload.problem_prompt.strip()
+    answer_key = payload.answer_key.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Lecture title is required")
+    if not problem_prompt:
+        raise HTTPException(status_code=400, detail="Problem prompt is required")
+    if not answer_key:
+        raise HTTPException(status_code=400, detail="Answer key is required")
+
+    description = (payload.description or "").strip() or None
+
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            sort_order = payload.sort_order
+            if sort_order is None:
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort
+                    FROM lectures
+                    WHERE course_id = %s::uuid
+                    """,
+                    (course_id,),
+                )
+                next_sort_row = cur.fetchone()
+                sort_order = int(next_sort_row["next_sort"] or 0) if next_sort_row else 0
+
+            cur.execute(
+                """
+                INSERT INTO lectures (
+                  course_id, title, description, problem_prompt, answer_key, sort_order
+                ) VALUES (%s::uuid, %s, %s, %s, %s, %s)
+                RETURNING
+                  id,
+                  title,
+                  description,
+                  problem_prompt,
+                  answer_key,
+                  sort_order,
+                  created_at
+                """,
+                (
+                    course_id,
+                    title,
+                    description,
+                    problem_prompt,
+                    answer_key,
+                    sort_order,
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to create lecture")
+    row_with_count = dict(row)
+    row_with_count["file_count"] = 0
+    return lecture_item_from_row(row_with_count)
+
+
+def upload_lecture_file_db(
+    user_id: str,
+    course_id: str,
+    lecture_id: str,
+    file_name: str,
+    content_type: Optional[str],
+    file_data: bytes,
+) -> LectureFileInfo:
+    if not file_name.strip():
+        raise HTTPException(status_code=400, detail="File name is required")
+    if not file_data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(file_data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is too large (max 20MB)")
+
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT l.id
+                FROM lectures l
+                JOIN courses c ON c.id = l.course_id
+                WHERE c.user_id = %s::uuid
+                  AND c.id = %s::uuid
+                  AND l.id = %s::uuid
+                """,
+                (user_id, course_id, lecture_id),
+            )
+            lecture_row = cur.fetchone()
+            if not lecture_row:
+                raise HTTPException(status_code=404, detail="Lecture not found")
+
+            cur.execute(
+                """
+                INSERT INTO lecture_files (lecture_id, file_name, content_type, size_bytes, file_data)
+                VALUES (%s::uuid, %s, %s, %s, %s)
+                RETURNING id, file_name, content_type, size_bytes, created_at
+                """,
+                (lecture_id, file_name.strip(), content_type, len(file_data), file_data),
+            )
+            row = cur.fetchone()
+        conn.commit()
+
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to upload lecture file")
+    return lecture_file_from_row(row)
+
+
 def load_attempt_state_db(attempt_id: str) -> AttemptState | None:
     with db_connect() as conn:
         with conn.cursor() as cur:
@@ -1418,6 +1849,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup() -> None:
+    global DB_READY
     if DB_ENABLED:
         if psycopg is None:
             raise RuntimeError(
@@ -1427,11 +1859,14 @@ def on_startup() -> None:
         try:
             init_db_schema()
             init_auth_schema()
+            DB_READY = True
         except Exception as exc:
-            raise RuntimeError(
-                "Failed to connect to PostgreSQL. Check DATABASE_URL, RDS public access, "
-                "security group inbound 5432, and SSL settings."
-            ) from exc
+            DB_READY = False
+            logger.warning(
+                "Startup DB initialization failed; server will stay up and retry on request. "
+                "Check DATABASE_URL/RDS network. cause=%s",
+                exc,
+            )
 
 
 @app.get("/health")
@@ -1559,6 +1994,91 @@ def google_auth_callback(
             url=append_fragment_params(fallback_return_to, {"oauth_error": "google_login_failed"}),
             status_code=302,
         )
+
+
+@app.get("/api/courses", response_model=List[CourseFolder])
+def list_courses(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> List[CourseFolder]:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    return list_courses_db(user.id)
+
+
+@app.post("/api/courses", response_model=CourseFolder, status_code=201)
+def create_course(
+    payload: CourseCreateRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> CourseFolder:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    return create_course_db(user.id, payload)
+
+
+@app.get("/api/courses/{course_id}", response_model=CourseDetailResponse)
+def get_course_detail(
+    course_id: str,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> CourseDetailResponse:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    return get_course_detail_db(user.id, course_id)
+
+
+@app.get("/api/courses/{course_id}/lectures", response_model=List[LectureItem])
+def list_course_lectures(
+    course_id: str,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> List[LectureItem]:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    return list_course_lectures_db(user.id, course_id, include_files=False)
+
+
+@app.post("/api/courses/{course_id}/lectures", response_model=LectureItem, status_code=201)
+def create_lecture(
+    course_id: str,
+    payload: LectureCreateRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> LectureItem:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    return create_lecture_db(user.id, course_id, payload)
+
+
+@app.get("/api/courses/{course_id}/lectures/{lecture_id}/files", response_model=List[LectureFileInfo])
+def list_lecture_files(
+    course_id: str,
+    lecture_id: str,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> List[LectureFileInfo]:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    return list_lecture_files_db(user.id, course_id, lecture_id)
+
+
+@app.post(
+    "/api/courses/{course_id}/lectures/{lecture_id}/files",
+    response_model=LectureFileInfo,
+    status_code=201,
+)
+async def upload_lecture_file(
+    course_id: str,
+    lecture_id: str,
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> LectureFileInfo:
+    require_db_enabled()
+    user = get_current_auth_user(authorization)
+    file_bytes = await file.read()
+    return upload_lecture_file_db(
+        user.id,
+        course_id,
+        lecture_id,
+        file.filename or "uploaded_file",
+        file.content_type,
+        file_bytes,
+    )
 
 
 @app.get("/api/problems", response_model=list[Problem])

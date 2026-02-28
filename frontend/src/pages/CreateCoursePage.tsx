@@ -1,40 +1,50 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createAttempt, getMe, postDailyProgressEvent } from "../api";
-import { clearAuthSession, getAccessToken, getAuthUser, saveAuthSession } from "../auth";
+import {
+  createCourse,
+  createLecture,
+  getCourseDetail,
+  getMe,
+  listCourses,
+  uploadLectureFile
+} from "../api";
+import { clearAuthSession, getAccessToken, saveAuthSession } from "../auth";
 import { AppShell } from "../components/AppShell";
-import type { AuthUser } from "../types";
-import { markCourseCreated } from "../utils/dailyProgress";
-
-const TOPIC_SUGGESTIONS = [
-  "Differentiation Basics",
-  "Quadratic Equations",
-  "Financial Literacy",
-  "Creative Writing",
-  "Public Speaking"
-];
+import type { CourseDetail, CourseFolder } from "../types";
 
 export function CreateCoursePage() {
   const navigate = useNavigate();
-  const [user, setUser] = useState<AuthUser | null>(() => getAuthUser());
   const [authLoading, setAuthLoading] = useState(true);
+  const [loadingCourses, setLoadingCourses] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const [courses, setCourses] = useState<CourseFolder[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [selectedCourse, setSelectedCourse] = useState<CourseDetail | null>(null);
+
+  const [courseTitle, setCourseTitle] = useState("");
+  const [courseSyllabus, setCourseSyllabus] = useState("");
   const [creatingCourse, setCreatingCourse] = useState(false);
-  const [courseTopic, setCourseTopic] = useState("Custom Course");
-  const [coursePrompt, setCoursePrompt] = useState("");
-  const [courseAnswer, setCourseAnswer] = useState("");
+
+  const [lectureTitle, setLectureTitle] = useState("");
+  const [lectureDescription, setLectureDescription] = useState("");
+  const [lecturePrompt, setLecturePrompt] = useState("");
+  const [lectureAnswer, setLectureAnswer] = useState("");
+  const [creatingLecture, setCreatingLecture] = useState(false);
+  const [uploadingLectureId, setUploadingLectureId] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const token = getAccessToken();
     if (!token) {
-      setAuthLoading(false);
+      navigate("/login", { replace: true });
       return;
     }
 
     getMe()
       .then((me) => {
         saveAuthSession(token, me);
-        setUser(me);
       })
       .catch(() => {
         clearAuthSession();
@@ -43,54 +53,79 @@ export function CreateCoursePage() {
       .finally(() => setAuthLoading(false));
   }, [navigate]);
 
-  const getActorId = () => {
-    if (user) {
-      return `user_${user.id}`;
+  const loadCourses = async (preferredCourseId?: string) => {
+    setLoadingCourses(true);
+    try {
+      const nextCourses = await listCourses();
+      setCourses(nextCourses);
+
+      if (nextCourses.length === 0) {
+        setSelectedCourseId(null);
+        setSelectedCourse(null);
+        return;
+      }
+
+      setSelectedCourseId((previous) => {
+        if (preferredCourseId && nextCourses.some((course) => course.id === preferredCourseId)) {
+          return preferredCourseId;
+        }
+        if (previous && nextCourses.some((course) => course.id === previous)) {
+          return previous;
+        }
+        return nextCourses[0].id;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load courses");
+    } finally {
+      setLoadingCourses(false);
     }
-    const existing = localStorage.getItem("guest_id");
-    if (existing) {
-      return existing;
-    }
-    const next = `guest_${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem("guest_id", next);
-    return next;
   };
 
-  const createCustomCourse = async () => {
-    if (!coursePrompt.trim()) {
-      setError("Please enter a course prompt first.");
+  useEffect(() => {
+    if (authLoading) {
       return;
     }
-    if (!courseAnswer.trim()) {
-      setError("Please add an expected answer key for demo solving.");
+    loadCourses();
+  }, [authLoading]);
+
+  const loadCourseDetail = async (courseId: string) => {
+    setLoadingDetail(true);
+    try {
+      const detail = await getCourseDetail(courseId);
+      setSelectedCourse(detail);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load course details");
+      setSelectedCourse(null);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedCourseId) {
+      setSelectedCourse(null);
+      return;
+    }
+    loadCourseDetail(selectedCourseId);
+  }, [selectedCourseId]);
+
+  const handleCreateCourse = async () => {
+    const title = courseTitle.trim();
+    if (!title) {
+      setError("Course title is required.");
       return;
     }
 
     setCreatingCourse(true);
     setError(null);
     try {
-      const attempt = await createAttempt({
-        guest_id: getActorId(),
-        problem_text: coursePrompt.trim(),
-        answer_key: courseAnswer.trim(),
-        unit: courseTopic.trim() || "Custom Course"
+      const created = await createCourse({
+        title,
+        syllabus: courseSyllabus.trim() || undefined
       });
-
-      const createdTopic = courseTopic.trim() || "Custom Course";
-      if (getAccessToken() && user) {
-        await postDailyProgressEvent({
-          event_type: "course_created",
-          attempt_id: attempt.attempt_id,
-          topic: createdTopic
-        }).catch(() => {
-          // Keep attempt creation successful even if progress sync fails.
-        });
-      } else {
-        markCourseCreated(attempt.attempt_id);
-        localStorage.setItem("current_course_topic", createdTopic);
-      }
-
-      navigate(`/solve/${attempt.attempt_id}`);
+      setCourseTitle("");
+      setCourseSyllabus("");
+      await loadCourses(created.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create course");
     } finally {
@@ -98,9 +133,60 @@ export function CreateCoursePage() {
     }
   };
 
-  const applySuggestion = (topic: string) => {
-    setCourseTopic(topic);
-    setCoursePrompt(`Teach me ${topic}. Give me one guided practice problem.`);
+  const handleCreateLecture = async () => {
+    if (!selectedCourseId) {
+      setError("Create or select a course first.");
+      return;
+    }
+    if (!lectureTitle.trim()) {
+      setError("Lecture title is required.");
+      return;
+    }
+    if (!lecturePrompt.trim()) {
+      setError("Lecture problem prompt is required.");
+      return;
+    }
+    if (!lectureAnswer.trim()) {
+      setError("Lecture answer key is required.");
+      return;
+    }
+
+    setCreatingLecture(true);
+    setError(null);
+    try {
+      await createLecture(selectedCourseId, {
+        title: lectureTitle.trim(),
+        description: lectureDescription.trim() || undefined,
+        problem_prompt: lecturePrompt.trim(),
+        answer_key: lectureAnswer.trim()
+      });
+      setLectureTitle("");
+      setLectureDescription("");
+      setLecturePrompt("");
+      setLectureAnswer("");
+
+      await Promise.all([loadCourses(selectedCourseId), loadCourseDetail(selectedCourseId)]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create lecture");
+    } finally {
+      setCreatingLecture(false);
+    }
+  };
+
+  const handleUploadLectureFile = async (lectureId: string, file: File | null) => {
+    if (!selectedCourseId || !file) {
+      return;
+    }
+    setUploadingLectureId(lectureId);
+    setError(null);
+    try {
+      await uploadLectureFile(selectedCourseId, lectureId, file);
+      await Promise.all([loadCourses(selectedCourseId), loadCourseDetail(selectedCourseId)]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to upload file");
+    } finally {
+      setUploadingLectureId(null);
+    }
   };
 
   if (authLoading) {
@@ -113,12 +199,6 @@ export function CreateCoursePage() {
             <span className="skeleton-pill" />
             <span className="skeleton-pill" />
           </div>
-          <div className="skeleton-grid-4">
-            <span className="skeleton-block" />
-            <span className="skeleton-block" />
-            <span className="skeleton-block" />
-            <span className="skeleton-block" />
-          </div>
         </section>
       </AppShell>
     );
@@ -127,64 +207,187 @@ export function CreateCoursePage() {
   return (
     <AppShell
       title="Create New Course"
-      subtitle="Build your own guided topic and launch an AI-coached attempt instantly."
+      subtitle="Create a course folder with syllabus, then add lectures and upload lecture files."
     >
       <div className="create-course-layout">
         <section className="practice-head-banner reveal reveal-1">
           <div>
-            <p className="overline">Custom Builder</p>
-            <h3>Design a course in one minute</h3>
-            <p>Set your own topic, prompt, and expected answer key for your demo flow.</p>
+            <p className="overline">Course Workspace</p>
+            <h3>Create folders and build lecture content</h3>
+            <p>Start with a course title and syllabus, then add lectures with prompts and files.</p>
           </div>
         </section>
 
         {error && <p className="error">{error}</p>}
 
-        <section className="panel-card course-builder reveal reveal-2" id="create-course">
-          <div className="builder-header">
-            <h3>Create New Course</h3>
-            <p>Use your own topic and immediately start a guided attempt.</p>
-          </div>
+        <section className="create-course-grid reveal reveal-2">
+          <aside className="panel-card course-builder-panel">
+            <div className="builder-header">
+              <h3>New Course Folder</h3>
+              <p>This creates the parent folder shown in Practice Studio.</p>
+            </div>
 
-          <label>
-            Course Topic
-            <input
-              value={courseTopic}
-              onChange={(event) => setCourseTopic(event.target.value)}
-              placeholder="Example: Intro to derivatives"
-            />
-          </label>
+            <label>
+              Course Name
+              <input
+                onChange={(event) => setCourseTitle(event.target.value)}
+                placeholder="Example: Algebra Foundations"
+                value={courseTitle}
+              />
+            </label>
 
-          <label>
-            Starter Prompt
-            <textarea
-              value={coursePrompt}
-              onChange={(event) => setCoursePrompt(event.target.value)}
-              placeholder="Example: Explain derivatives conceptually and ask one practice question."
-              rows={5}
-            />
-          </label>
+            <label>
+              Syllabus
+              <textarea
+                onChange={(event) => setCourseSyllabus(event.target.value)}
+                placeholder="Week 1: factoring, Week 2: quadratics, Week 3: applications"
+                rows={4}
+                value={courseSyllabus}
+              />
+            </label>
 
-          <label>
-            Expected Answer Key (for demo)
-            <input
-              value={courseAnswer}
-              onChange={(event) => setCourseAnswer(event.target.value)}
-              placeholder="Example: 6x+2"
-            />
-          </label>
+            <button className="btn-primary" disabled={creatingCourse} onClick={handleCreateCourse} type="button">
+              {creatingCourse ? "Creating..." : "Create Course Folder"}
+            </button>
 
-          <div className="topic-chips">
-            {TOPIC_SUGGESTIONS.map((topic) => (
-              <button className="chip-btn" key={topic} onClick={() => applySuggestion(topic)} type="button">
-                {topic}
-              </button>
-            ))}
-          </div>
+            <div className="course-folder-list-wrap">
+              <div className="builder-header compact">
+                <h4>Course Folders</h4>
+                <p>{loadingCourses ? "Loading..." : `${courses.length} total`}</p>
+              </div>
 
-          <button className="btn-teal" onClick={createCustomCourse} disabled={creatingCourse} type="button">
-            {creatingCourse ? "Creating..." : "Create Course & Start"}
-          </button>
+              <div className="course-folder-list">
+                {courses.map((course) => (
+                  <button
+                    className={`course-folder-item${selectedCourseId === course.id ? " active" : ""}`}
+                    key={course.id}
+                    onClick={() => setSelectedCourseId(course.id)}
+                    type="button"
+                  >
+                    <strong>{course.title}</strong>
+                    <small>{course.lecture_count} lectures • {course.file_count} files</small>
+                  </button>
+                ))}
+                {!loadingCourses && courses.length === 0 && (
+                  <p className="muted">No folders yet. Create your first course folder.</p>
+                )}
+              </div>
+            </div>
+          </aside>
+
+          <section className="panel-card lecture-workspace-panel">
+            {!selectedCourseId && (
+              <div className="empty-course-state">
+                <h3>No course selected</h3>
+                <p>Create a course folder first, then lectures and files will appear here.</p>
+              </div>
+            )}
+
+            {selectedCourseId && (
+              <>
+                <div className="workspace-head">
+                  <h3>{selectedCourse?.title ?? "Loading course..."}</h3>
+                  <p>{selectedCourse?.syllabus || "No syllabus yet."}</p>
+                </div>
+
+                <div className="lecture-form-grid">
+                  <label>
+                    Lecture Title
+                    <input
+                      onChange={(event) => setLectureTitle(event.target.value)}
+                      placeholder="Example: Solving by factoring"
+                      value={lectureTitle}
+                    />
+                  </label>
+
+                  <label>
+                    Description (Optional)
+                    <input
+                      onChange={(event) => setLectureDescription(event.target.value)}
+                      placeholder="Short summary for this lecture"
+                      value={lectureDescription}
+                    />
+                  </label>
+
+                  <label>
+                    Practice Prompt
+                    <textarea
+                      onChange={(event) => setLecturePrompt(event.target.value)}
+                      placeholder="Example: Solve x^2 - 5x + 6 = 0"
+                      rows={3}
+                      value={lecturePrompt}
+                    />
+                  </label>
+
+                  <label>
+                    Answer Key
+                    <input
+                      onChange={(event) => setLectureAnswer(event.target.value)}
+                      placeholder="Example: 2,3"
+                      value={lectureAnswer}
+                    />
+                  </label>
+                </div>
+
+                <button
+                  className="btn-teal"
+                  disabled={creatingLecture || loadingDetail}
+                  onClick={handleCreateLecture}
+                  type="button"
+                >
+                  {creatingLecture ? "Adding Lecture..." : "Add Lecture"}
+                </button>
+
+                <div className="lecture-card-list">
+                  {loadingDetail && <p className="muted">Loading lectures...</p>}
+                  {!loadingDetail && selectedCourse?.lectures.length === 0 && (
+                    <p className="muted">No lectures yet. Add your first lecture above.</p>
+                  )}
+
+                  {selectedCourse?.lectures.map((lecture) => (
+                    <article className="lecture-admin-card" key={lecture.id}>
+                      <div className="lecture-admin-head">
+                        <div>
+                          <h4>{lecture.title}</h4>
+                          <p>{lecture.description || "No description"}</p>
+                        </div>
+                        <span className="unit-tag">{lecture.file_count} files</span>
+                      </div>
+
+                      <p className="problem-prompt">{lecture.problem_prompt}</p>
+
+                      <div className="lecture-upload-row">
+                        <label className="btn-muted file-upload-btn" htmlFor={`file-${lecture.id}`}>
+                          {uploadingLectureId === lecture.id ? "Uploading..." : "Upload Lecture File"}
+                        </label>
+                        <input
+                          className="upload-input"
+                          id={`file-${lecture.id}`}
+                          onChange={(event) => {
+                            const nextFile = event.target.files?.[0] ?? null;
+                            void handleUploadLectureFile(lecture.id, nextFile);
+                            event.currentTarget.value = "";
+                          }}
+                          type="file"
+                        />
+                      </div>
+
+                      {lecture.files.length > 0 && (
+                        <ul className="lecture-file-list">
+                          {lecture.files.map((file) => (
+                            <li key={file.id}>
+                              <span>{file.file_name}</span>
+                              <small>{Math.max(1, Math.round(file.size_bytes / 1024))} KB</small>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
         </section>
       </div>
     </AppShell>
