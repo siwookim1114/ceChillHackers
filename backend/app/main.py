@@ -5,7 +5,8 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Dict, List, Literal, Optional, Union
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -29,6 +30,25 @@ load_dotenv(ROOT_ENV_PATH)
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+
+def normalize_database_url(url: str) -> str:
+    if not url:
+        return url
+    parts = urlsplit(url)
+    if "rds.amazonaws.com" not in (parts.hostname or ""):
+        return url
+
+    query_items = dict(parse_qsl(parts.query))
+    if "sslmode" not in query_items:
+        query_items["sslmode"] = "require"
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment)
+        )
+    return url
+
+
+DATABASE_URL = normalize_database_url(DATABASE_URL)
 DB_ENABLED = bool(DATABASE_URL) and "<DB_PASSWORD>" not in DATABASE_URL
 
 
@@ -75,11 +95,11 @@ class Problem(BaseModel):
 
 
 class AttemptCreateRequest(BaseModel):
-    guest_id: str | None = None
-    problem_id: str | None = None
-    problem_text: str | None = None
-    answer_key: str | None = None
-    unit: str | None = None
+    guest_id: Optional[str] = None
+    problem_id: Optional[str] = None
+    problem_text: Optional[str] = None
+    answer_key: Optional[str] = None
+    unit: Optional[str] = None
 
 
 class AttemptCreateResponse(BaseModel):
@@ -99,12 +119,12 @@ EventType = Literal[
 
 class ClientEvent(BaseModel):
     type: EventType
-    ts: datetime | None = None
-    payload: dict[str, Any] = Field(default_factory=dict)
+    ts: Optional[datetime] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 class EventBatchRequest(BaseModel):
-    events: list[ClientEvent]
+    events: List[ClientEvent]
 
 
 class StuckSignals(BaseModel):
@@ -118,21 +138,21 @@ class Intervention(BaseModel):
     level: Literal[1, 2, 3]
     reason: str
     tutor_message: str
-    citations: list[dict[str, str]] | None = None
+    citations: Optional[List[Dict[str, str]]] = None
     created_at: datetime
 
 
 class EventBatchResponse(BaseModel):
     accepted: int
     stuck_signals: StuckSignals
-    intervention: Intervention | None = None
+    intervention: Optional[Intervention] = None
     solved: bool
 
 
 class AttemptDetailResponse(BaseModel):
     attempt_id: str
     started_at: datetime
-    solved_at: datetime | None
+    solved_at: Optional[datetime]
     problem: Problem
 
 
@@ -143,7 +163,7 @@ class TimelineEntry(BaseModel):
 
 
 class SummaryMetrics(BaseModel):
-    time_to_solve_sec: int | None
+    time_to_solve_sec: Optional[int]
     max_stuck: int
     hint_max_level: int
     erase_count: int
@@ -152,7 +172,7 @@ class SummaryMetrics(BaseModel):
 class AttemptSummaryResponse(BaseModel):
     attempt_id: str
     metrics: SummaryMetrics
-    timeline: list[TimelineEntry]
+    timeline: List[TimelineEntry]
 
 
 @dataclass
@@ -160,15 +180,15 @@ class AttemptState:
     id: str
     started_at: datetime
     problem: Problem
-    guest_id: str | None = None
-    solved_at: datetime | None = None
-    events: list[ClientEvent] = field(default_factory=list)
-    interventions: list[Intervention] = field(default_factory=list)
-    stuck_scores: list[int] = field(default_factory=list)
-    last_intervention_at: datetime | None = None
+    guest_id: Optional[str] = None
+    solved_at: Optional[datetime] = None
+    events: List[ClientEvent] = field(default_factory=list)
+    interventions: List[Intervention] = field(default_factory=list)
+    stuck_scores: List[int] = field(default_factory=list)
+    last_intervention_at: Optional[datetime] = None
 
 
-DEFAULT_PROBLEMS: list[Problem] = [
+DEFAULT_PROBLEMS: List[Problem] = [
     Problem(
         id="quadratic-01",
         title="Quadratic Basics",
@@ -193,7 +213,7 @@ DEFAULT_PROBLEMS: list[Problem] = [
 ]
 
 PROBLEM_BY_ID = {p.id: p for p in DEFAULT_PROBLEMS}
-ATTEMPTS: dict[str, AttemptState] = {}
+ATTEMPTS: Dict[str, AttemptState] = {}
 
 
 def normalize_text(value: str) -> str:
@@ -667,7 +687,13 @@ def on_startup() -> None:
                 "DATABASE_URL is configured but psycopg is not installed. "
                 "Install backend requirements first."
             )
-        init_db_schema()
+        try:
+            init_db_schema()
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to connect to PostgreSQL. Check DATABASE_URL, RDS public access, "
+                "security group inbound 5432, and SSL settings."
+            ) from exc
 
 
 @app.get("/health")
@@ -771,7 +797,7 @@ def ingest_events(attempt_id: str, payload: EventBatchRequest) -> EventBatchResp
     )
 
 
-@app.get("/api/attempts/{attempt_id}/intervention", response_model=Intervention | None)
+@app.get("/api/attempts/{attempt_id}/intervention", response_model=Optional[Intervention])
 def get_latest_intervention(attempt_id: str) -> Intervention | None:
     if DB_ENABLED:
         attempt = load_attempt_state_db(attempt_id)
