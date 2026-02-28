@@ -1,6 +1,6 @@
 aws:
   region: us-east-1
-  s3_bucket: soon
+  top_k: 5  
 
 agents:
   professor:
@@ -25,6 +25,8 @@ agents:
 bedrock:
   knowledge_base_id: soon
   data_source_id: soon
+  models:
+    rag: us.anthropic.claude-
 
 rag:
   top_k: 5
