@@ -1,13 +1,22 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const LEVELS = ["Beginner", "Intermediate", "Advanced"];
-const STYLES = ["Socratic", "Step-by-step", "Concept-first"];
+const LEVELS: Array<{ value: string; icon: string; label: string; desc: string }> = [
+  { value: "Beginner", icon: "🌱", label: "Beginner", desc: "New to this topic" },
+  { value: "Intermediate", icon: "🔥", label: "Intermediate", desc: "Some experience" },
+  { value: "Advanced", icon: "⚡", label: "Advanced", desc: "Comfortable with concepts" },
+];
+
+const STYLES: Array<{ value: string; icon: string; label: string; desc: string }> = [
+  { value: "Socratic", icon: "❓", label: "Socratic", desc: "Guide me with questions" },
+  { value: "Step-by-step", icon: "📍", label: "Step-by-step", desc: "Break it down for me" },
+  { value: "Concept-first", icon: "💡", label: "Concept-first", desc: "Explain the big idea" },
+];
 
 export function OnboardingPage() {
   const navigate = useNavigate();
-  const [level, setLevel] = useState(localStorage.getItem("preferred_level") ?? LEVELS[0]);
-  const [style, setStyle] = useState(localStorage.getItem("preferred_style") ?? STYLES[0]);
+  const [level, setLevel] = useState(localStorage.getItem("preferred_level") ?? LEVELS[0].value);
+  const [style, setStyle] = useState(localStorage.getItem("preferred_style") ?? STYLES[0].value);
 
   const continueToHome = () => {
     localStorage.setItem("preferred_level", level);
@@ -17,34 +26,53 @@ export function OnboardingPage() {
 
   return (
     <main className="page">
-      <section className="card">
-        <h2>Onboarding</h2>
-        <p className="muted">Set your baseline so hints are tuned to your level and coaching style.</p>
+      <section className="card onboarding-card">
+        <div className="onboarding-header">
+          <p className="overline">TutorCoach</p>
+          <h2>Quick Setup</h2>
+          <p className="muted">
+            Hints will be tuned to your level and coaching style.
+          </p>
+        </div>
 
-        <label>
-          Learning Level
-          <select value={level} onChange={(event) => setLevel(event.target.value)}>
+        <div className="option-group">
+          <span>Your Level</span>
+          <div className="option-cards">
             {LEVELS.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
+              <button
+                key={item.value}
+                className={`option-card${level === item.value ? " selected" : ""}`}
+                onClick={() => setLevel(item.value)}
+                type="button"
+              >
+                <span className="opt-icon">{item.icon}</span>
+                <span className="opt-label">{item.label}</span>
+                <span className="opt-desc">{item.desc}</span>
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+        </div>
 
-        <label>
-          Coaching Style
-          <select value={style} onChange={(event) => setStyle(event.target.value)}>
+        <div className="option-group">
+          <span>Coaching Style</span>
+          <div className="option-cards">
             {STYLES.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
+              <button
+                key={item.value}
+                className={`option-card${style === item.value ? " selected" : ""}`}
+                onClick={() => setStyle(item.value)}
+                type="button"
+              >
+                <span className="opt-icon">{item.icon}</span>
+                <span className="opt-label">{item.label}</span>
+                <span className="opt-desc">{item.desc}</span>
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+        </div>
 
-        <button className="btn-primary" onClick={continueToHome}>
-          Continue
+        <button className="btn-primary" onClick={continueToHome} type="button">
+          Let&apos;s Practice →
         </button>
       </section>
     </main>

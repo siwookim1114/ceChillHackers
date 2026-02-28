@@ -16,15 +16,31 @@ export function EntryPage() {
   return (
     <main className="page page-entry">
       <section className="hero">
-        <p className="overline">AI Coach</p>
-        <h1>Productive Struggle Coach</h1>
-        <p>
-          Real-time learning coach that detects stuck moments from your solving behavior and steps in with
-          the smallest helpful hint.
+        <div className="hero-badge">
+          <span className="live-dot" />
+          Live Adaptive Coaching
+        </div>
+
+        <h1>Learn Better With Smart Intervention</h1>
+
+        <p className="hero-description">
+          Real-time coach that detects when you&apos;re stuck from your solving behavior
+          and steps in with the <em>smallest</em> helpful hint — never the answer.
         </p>
-        <button className="btn-primary" onClick={startAsGuest}>
-          Start as Guest
-        </button>
+
+        <div className="hero-features">
+          <span className="feature-chip">🔍 Stuck Detection</span>
+          <span className="feature-chip">💡 Hint Level 1–3</span>
+          <span className="feature-chip">📊 Session Summary</span>
+          <span className="feature-chip">⚡ Real-time Signals</span>
+        </div>
+
+        <div className="hero-cta">
+          <button className="btn-primary" onClick={startAsGuest} type="button">
+            Start as Guest →
+          </button>
+          <span className="hint-text">No account needed · Free forever</span>
+        </div>
       </section>
     </main>
   );

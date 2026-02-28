@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getAttempt, getIntervention, postEvents } from "../api";
+import { AppShell } from "../components/AppShell";
 import { CoachPanel } from "../components/CoachPanel";
 import type { Attempt, ClientEvent, Intervention, StuckSignals } from "../types";
 
@@ -99,7 +100,7 @@ export function SolvePage() {
           }
         })
         .catch(() => {
-          // Ignore polling errors; event batch flow still drives latest state.
+          // Ignore polling errors and keep event flow running.
         });
     }, 7000);
 
@@ -156,74 +157,79 @@ export function SolvePage() {
 
   if (loading) {
     return (
-      <main className="page">
-        <section className="card">
-          <p>Loading attempt...</p>
+      <AppShell title="Practice Session" subtitle="Loading your attempt...">
+        <section className="panel-card">
+          <div className="loading-state">
+            <div className="spinner" />
+            <span>Loading attempt…</span>
+          </div>
         </section>
-      </main>
+      </AppShell>
     );
   }
 
   if (!attempt) {
     return (
-      <main className="page">
-        <section className="card">
+      <AppShell title="Practice Session" subtitle="Unable to open this attempt">
+        <section className="panel-card">
           <p className="error">{error ?? "Attempt not found"}</p>
         </section>
-      </main>
+      </AppShell>
     );
   }
 
   return (
-    <main className="page solve-page">
-      <section className="card solve-layout">
+    <AppShell title={attempt.problem.title} subtitle={`Unit: ${attempt.problem.unit}`}>
+      <section className="solve-layout panel-card">
         <div className="workspace">
-          <p className="overline">{attempt.problem.unit}</p>
-          <h2>{attempt.problem.title}</h2>
-          <p className="prompt">{attempt.problem.prompt}</p>
+          <div className="problem-header">
+            <p className="overline">Practice Prompt</p>
+            <h3>{attempt.problem.title}</h3>
+          </div>
 
-          <label>
-            Work Canvas
+          <div className="problem-statement">{attempt.problem.prompt}</div>
+
+          <div className="canvas-label">
+            <span>Work Canvas</span>
             <textarea
               value={workText}
               onChange={(event) => onWorkChange(event.target.value)}
-              placeholder="Write your steps here..."
+              placeholder="Write your steps here…"
               rows={10}
             />
-          </label>
+          </div>
 
           <div className="action-row">
-            <button className="btn-muted" onClick={eraseOne}>
-              Erase Stroke
-            </button>
-            <button className="btn-muted" onClick={requestHint}>
-              Ask Coach Hint
+            <button className="btn-muted" onClick={eraseOne} type="button">
+              ⌫ Erase Last
             </button>
           </div>
 
-          <label>
-            Final Answer
-            <input
-              value={answer}
-              onChange={(event) => setAnswer(event.target.value)}
-              placeholder="Type your final answer"
-            />
-          </label>
-
-          <div className="action-row">
-            <button className="btn-primary" onClick={submitAnswer}>
-              Submit Answer
-            </button>
-            <button className="btn-muted" onClick={() => navigate(`/result/${attempt.attempt_id}`)}>
-              View Summary
-            </button>
+          <div className="answer-row">
+            <span>Final Answer</span>
+            <div className="answer-input-row">
+              <input
+                value={answer}
+                onChange={(event) => setAnswer(event.target.value)}
+                placeholder="Type your final answer…"
+              />
+              <button className="btn-primary" onClick={submitAnswer} type="button">
+                Submit
+              </button>
+            </div>
           </div>
 
           {error && <p className="error">{error}</p>}
+
+          <div className="action-row">
+            <button className="btn-muted" onClick={() => navigate(`/result/${attempt.attempt_id}`)} type="button">
+              View Summary
+            </button>
+          </div>
         </div>
 
-        <CoachPanel signals={signals} intervention={intervention} />
+        <CoachPanel signals={signals} intervention={intervention} onRequestHint={requestHint} />
       </section>
-    </main>
+    </AppShell>
   );
 }
