@@ -3,6 +3,7 @@ import type { SVGProps } from "react";
 export type AppIconName =
   | "nav-dashboard"
   | "nav-practice"
+  | "nav-create-course"
   | "nav-planner"
   | "nav-progress"
   | "nav-library"
@@ -73,6 +74,14 @@ export function AppIcon({ name, className }: AppIconProps) {
           strokeWidth="1.8"
         />
         <path d="M10 11.2h4M10 14.4h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+  if (name === "nav-create-course") {
+    return (
+      <svg {...baseProps}>
+        <rect x="4.5" y="4.5" width="15" height="15" rx="3" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M12 8v8M8 12h8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
       </svg>
     );
   }

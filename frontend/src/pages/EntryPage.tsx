@@ -89,7 +89,7 @@ const FAQS = [
   },
   {
     q: "Can I make my own course topic?",
-    a: "Yes. In Practice Studio, use Create New Course to generate a custom guided problem instantly."
+    a: "Yes. Open Create New Course from the sidebar to generate a custom guided problem instantly."
   },
   {
     q: "Can I use the same account on another laptop?",

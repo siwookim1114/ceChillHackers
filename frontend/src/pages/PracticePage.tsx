@@ -4,15 +4,6 @@ import { createAttempt, getMe, listProblems, postDailyProgressEvent } from "../a
 import { clearAuthSession, getAccessToken, getAuthUser, saveAuthSession } from "../auth";
 import { AppShell } from "../components/AppShell";
 import type { AuthUser, Problem } from "../types";
-import { markCourseCreated } from "../utils/dailyProgress";
-
-const TOPIC_SUGGESTIONS = [
-  "Differentiation Basics",
-  "Quadratic Equations",
-  "Financial Literacy",
-  "Creative Writing",
-  "Public Speaking"
-];
 
 export function PracticePage() {
   const navigate = useNavigate();
@@ -22,10 +13,6 @@ export function PracticePage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
-  const [creatingCourse, setCreatingCourse] = useState(false);
-  const [courseTopic, setCourseTopic] = useState("Custom Course");
-  const [coursePrompt, setCoursePrompt] = useState("");
-  const [courseAnswer, setCourseAnswer] = useState("");
 
   const level = localStorage.getItem("preferred_level") ?? "Beginner";
   const style = localStorage.getItem("preferred_style") ?? "Socratic";
@@ -95,51 +82,6 @@ export function PracticePage() {
     }
   };
 
-  const createCustomCourse = async () => {
-    if (!coursePrompt.trim()) {
-      setError("Please enter a course prompt first.");
-      return;
-    }
-    if (!courseAnswer.trim()) {
-      setError("Please add an expected answer key for demo solving.");
-      return;
-    }
-
-    setCreatingCourse(true);
-    setError(null);
-    try {
-      const attempt = await createAttempt({
-        guest_id: getActorId(),
-        problem_text: coursePrompt.trim(),
-        answer_key: courseAnswer.trim(),
-        unit: courseTopic.trim() || "Custom Course"
-      });
-      const createdTopic = courseTopic.trim() || "Custom Course";
-      if (getAccessToken() && user) {
-        await postDailyProgressEvent({
-          event_type: "course_created",
-          attempt_id: attempt.attempt_id,
-          topic: createdTopic
-        }).catch(() => {
-          // Keep attempt creation successful even if progress sync fails.
-        });
-      } else {
-        markCourseCreated(attempt.attempt_id);
-        localStorage.setItem("current_course_topic", createdTopic);
-      }
-      navigate(`/solve/${attempt.attempt_id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create course");
-    } finally {
-      setCreatingCourse(false);
-    }
-  };
-
-  const applySuggestion = (topic: string) => {
-    setCourseTopic(topic);
-    setCoursePrompt(`Teach me ${topic}. Give me one guided practice problem.`);
-  };
-
   if (authLoading) {
     return (
       <AppShell title="Practice Studio" subtitle="Checking your session...">
@@ -162,118 +104,59 @@ export function PracticePage() {
   }
 
   return (
-    <AppShell
-      title="Practice Studio"
-      subtitle="Choose a problem or create a custom course with your own prompt."
-    >
+    <AppShell title="Practice Studio" subtitle="Choose a problem and start a coached solving session.">
       <div className="practice-page-wrap">
         <section className="practice-head-banner reveal reveal-1">
           <div>
             <p className="overline">Live Workspace</p>
-            <h3>Build and solve with real-time coaching</h3>
+            <h3>Train with focused problem sets</h3>
             <p>
               Level: <strong>{level}</strong> | Style: <strong>{style}</strong>
             </p>
           </div>
-          <button
-            className="btn-primary"
-            onClick={() => document.getElementById("create-course")?.scrollIntoView({ behavior: "smooth" })}
-            type="button"
-          >
-            Jump to Course Builder
-          </button>
         </section>
 
         {error && <p className="error">{error}</p>}
 
-        <section className="home-grid reveal reveal-2">
-          <div className="panel-card problem-catalog">
-            <div className="home-header">
-              <h3>Problem Catalog</h3>
-              <span className="user-pill">
-                <strong>{problems.length}</strong>
-                <span>ready</span>
-              </span>
-            </div>
-
-            {loading && (
-              <div className="catalog-skeleton" aria-label="Loading problems">
-                <div className="skeleton-line skeleton-line-medium" />
-                <div className="skeleton-grid-3">
-                  <span className="skeleton-block" />
-                  <span className="skeleton-block" />
-                  <span className="skeleton-block" />
-                </div>
-              </div>
-            )}
-
-            <div className="problem-grid">
-              {problems.map((problem) => (
-                <article className="problem-card" key={problem.id}>
-                  <div className="problem-card-top">
-                    <span className="unit-tag">{problem.unit}</span>
-                  </div>
-                  <h4>{problem.title}</h4>
-                  <p className="problem-prompt">{problem.prompt}</p>
-                  <button
-                    className="btn-primary"
-                    disabled={launchingId === problem.id}
-                    onClick={() => startPractice(problem.id)}
-                    type="button"
-                  >
-                    {launchingId === problem.id ? "Starting..." : "Start Practice"}
-                  </button>
-                </article>
-              ))}
-            </div>
+        <section className="panel-card problem-catalog reveal reveal-2">
+          <div className="home-header">
+            <h3>Problem Catalog</h3>
+            <span className="user-pill">
+              <strong>{problems.length}</strong>
+              <span>ready</span>
+            </span>
           </div>
 
-          <aside className="panel-card course-builder" id="create-course">
-            <div className="builder-header">
-              <h3>Create New Course</h3>
-              <p>Use your own topic and immediately start a guided attempt.</p>
+          {loading && (
+            <div className="catalog-skeleton" aria-label="Loading problems">
+              <div className="skeleton-line skeleton-line-medium" />
+              <div className="skeleton-grid-3">
+                <span className="skeleton-block" />
+                <span className="skeleton-block" />
+                <span className="skeleton-block" />
+              </div>
             </div>
+          )}
 
-            <label>
-              Course Topic
-              <input
-                value={courseTopic}
-                onChange={(event) => setCourseTopic(event.target.value)}
-                placeholder="Example: Intro to derivatives"
-              />
-            </label>
-
-            <label>
-              Starter Prompt
-              <textarea
-                value={coursePrompt}
-                onChange={(event) => setCoursePrompt(event.target.value)}
-                placeholder="Example: Explain derivatives conceptually and ask one practice question."
-                rows={5}
-              />
-            </label>
-
-            <label>
-              Expected Answer Key (for demo)
-              <input
-                value={courseAnswer}
-                onChange={(event) => setCourseAnswer(event.target.value)}
-                placeholder="Example: 6x+2"
-              />
-            </label>
-
-            <div className="topic-chips">
-              {TOPIC_SUGGESTIONS.map((topic) => (
-                <button className="chip-btn" key={topic} onClick={() => applySuggestion(topic)} type="button">
-                  {topic}
+          <div className="problem-grid">
+            {problems.map((problem) => (
+              <article className="problem-card" key={problem.id}>
+                <div className="problem-card-top">
+                  <span className="unit-tag">{problem.unit}</span>
+                </div>
+                <h4>{problem.title}</h4>
+                <p className="problem-prompt">{problem.prompt}</p>
+                <button
+                  className="btn-primary"
+                  disabled={launchingId === problem.id}
+                  onClick={() => startPractice(problem.id)}
+                  type="button"
+                >
+                  {launchingId === problem.id ? "Starting..." : "Start Practice"}
                 </button>
-              ))}
-            </div>
-
-            <button className="btn-teal" onClick={createCustomCourse} disabled={creatingCourse} type="button">
-              {creatingCourse ? "Creating..." : "Create Course & Start"}
-            </button>
-          </aside>
+              </article>
+            ))}
+          </div>
         </section>
       </div>
     </AppShell>

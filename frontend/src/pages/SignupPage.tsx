@@ -86,7 +86,7 @@ export function SignupPage() {
 
           <nav className="entry-nav-links">
             <a href="/practice">Practice</a>
-            <a href="/practice#create-course">Create Course</a>
+            <a href="/create-course">Create Course</a>
             <a href="/progress">Session Results</a>
             <a href="/home">AI Coach</a>
           </nav>

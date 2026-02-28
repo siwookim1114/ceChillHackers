@@ -1960,6 +1960,13 @@ label {
   gap: 14px;
 }
 
+.create-course-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 860px);
+  justify-content: center;
+}
+
 .practice-head-banner {
   border-radius: 24px;
   padding: 20px;

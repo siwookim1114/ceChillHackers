@@ -15,6 +15,7 @@ type AppShellProps = {
 const NAV_ITEMS = [
   { label: "Dashboard", to: "/home", icon: "nav-dashboard" as AppIconName },
   { label: "Practice Studio", to: "/practice", icon: "nav-practice" as AppIconName },
+  { label: "Create New Course", to: "/create-course", icon: "nav-create-course" as AppIconName },
   { label: "Study Planner", to: "/planner", icon: "nav-planner" as AppIconName },
   { label: "Progress", to: "/progress", icon: "nav-progress" as AppIconName },
   { label: "Library", to: "/library", icon: "nav-library" as AppIconName },
@@ -268,9 +269,6 @@ export function AppShell({
             </label>
           </div>
           <div className="topbar-actions">
-            <button className="btn-muted topbar-cta" onClick={() => navigate("/practice#create-course")} type="button">
-              Create Course
-            </button>
             <div
               className="topbar-profile-wrap"
               onMouseEnter={openProfileMenu}

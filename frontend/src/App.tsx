@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { CommunityPage } from "./pages/CommunityPage";
+import { CreateCoursePage } from "./pages/CreateCoursePage";
 import { EntryPage } from "./pages/EntryPage";
 import { FriendsPage } from "./pages/FriendsPage";
 import { HomePage } from "./pages/HomePage";
@@ -28,6 +29,7 @@ export default function App() {
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/home" element={<HomePage />} />
       <Route path="/practice" element={<PracticePage />} />
+      <Route path="/create-course" element={<CreateCoursePage />} />
       <Route path="/planner" element={<PlannerPage />} />
       <Route path="/progress" element={<ProgressPage />} />
       <Route path="/library" element={<LibraryPage />} />
