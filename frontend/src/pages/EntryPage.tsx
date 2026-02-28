@@ -16,7 +16,7 @@ export function EntryPage() {
   return (
     <main className="page page-entry">
       <section className="hero">
-        <p className="overline">RevisionDojo</p>
+        <p className="overline">AI Coach</p>
         <h1>Productive Struggle Coach</h1>
         <p>
           Real-time learning coach that detects stuck moments from your solving behavior and steps in with

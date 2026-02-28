@@ -1,1 +1,1 @@
-# RevisionDojo backend package
+# AI coach backend package

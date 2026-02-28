@@ -248,7 +248,7 @@ def should_emit_intervention(attempt: AttemptState, level: int, force: bool = Fa
     return utcnow() - attempt.last_intervention_at > timedelta(seconds=15)
 
 
-app = FastAPI(title="RevisionDojo MVP API", version="0.1.0")
+app = FastAPI(title="AI Coach MVP API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,

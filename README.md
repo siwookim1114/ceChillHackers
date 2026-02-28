@@ -1,6 +1,6 @@
 # ceChillHackers
 
-RevisionDojo-style hackathon MVP for a personalized AI teacher.
+Hackathon MVP for a personalized AI teacher.
 
 ## What is implemented
 

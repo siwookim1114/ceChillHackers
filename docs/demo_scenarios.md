@@ -1,4 +1,4 @@
-# Demo Scenarios (RevisionDojo MVP)
+# Demo Scenarios (MVP)
 
 ## 1) Quadratic Basics
 
