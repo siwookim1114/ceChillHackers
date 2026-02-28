@@ -1,0 +1,13 @@
+aws:
+  region: us-east-1
+  s3_bucket: soon
+
+bedrock:
+  knowledge_base_id: soon
+  data_source_id: soon
+
+rag:
+  top_k: 5
+  chunk_size: 512
+  chunk_overlap: 64
+
