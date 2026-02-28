@@ -50,6 +50,10 @@ frontend/.vite/
 tmp/
 temp/
 
+# Audio / media test artifacts
+*.mp3
+*.wav
+
 # Local databases
 *.db
 *.sqlite3
