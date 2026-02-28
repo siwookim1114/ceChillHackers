@@ -24,7 +24,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
@@ -1872,6 +1872,174 @@ def orchestrator_chat(req: OrchestratorChatRequest):
     )
 
 
+# ---------------------------------------------------------------------------
+# Voice Orchestration endpoint (STT → LangGraph → TTS)
+# ---------------------------------------------------------------------------
+
+class OrchestratorVoiceResponse(BaseModel):
+    """Response from the voice orchestration pipeline."""
+    session_id: str
+    transcript: str
+    agent_name: str
+    response_text: str
+    structured_data: dict = Field(default_factory=dict)
+    citations: list = Field(default_factory=list)
+    next_action: str = "continue"
+    route_used: str = ""
+    intent: str = ""
+    awaiting_feedback: bool = False
+    turn_count: int = 0
+    rag_found: bool = False
+    rag_citations_count: int = 0
+    audio_base64: str = ""
+
+
+@app.post("/api/chat/voice", response_model=OrchestratorVoiceResponse)
+async def orchestrator_voice(
+    audio: UploadFile = File(...),
+    session_id: str = Form("voice-session"),
+    topic: str = Form("general"),
+    level: str = Form("intermediate"),
+    learning_style: str = Form("mixed"),
+    pace: str = Form("medium"),
+    mode: str = Form("strict"),
+    knowledge_mode: str = Form("internal_only"),
+    require_human_review: str = Form("false"),
+):
+    """Voice-in, voice-out orchestration endpoint.
+
+    Pipeline: STT (Whisper) → LangGraph orchestration → TTS (MiniMax)
+    """
+    import asyncio
+    import base64 as b64mod
+    from services.voice_service import VoiceService
+
+    voice = VoiceService()
+
+    # Step 1: Read audio
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file.")
+
+    content_type = audio.content_type or "audio/webm"
+
+    # Step 2: STT
+    try:
+        transcript = await voice.speech_to_text(audio_bytes, content_type)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Speech-to-text error: {exc}")
+
+    # Step 3: Route through LangGraph orchestration
+    from agents.graph import get_graph
+
+    graph = get_graph()
+    thread_id = session_id
+    graph_config = {"configurable": {"thread_id": thread_id}}
+
+    hitl = require_human_review.lower() in ("true", "1", "yes")
+
+    existing_state = None
+    try:
+        snapshot = graph.get_state(graph_config)
+        if snapshot and snapshot.values and snapshot.values.get("agent_outputs_history"):
+            existing_state = snapshot.values
+    except Exception:
+        pass
+
+    turn_count = 0
+    if existing_state:
+        turn_count = existing_state.get("session", {}).get("turn_count", 0) + 1
+
+    input_state = {
+        "user_message": transcript,
+        "user_profile": {
+            "user_id": "voice-user",
+            "level": level,
+            "learning_style": learning_style,
+            "pace": pace,
+        },
+        "session": {
+            "session_id": session_id,
+            "topic": topic,
+            "subject": topic,
+            "mode": mode,
+            "knowledge_mode": knowledge_mode,
+            "require_human_review": hitl,
+            "turn_count": turn_count,
+        },
+        "route_history": [],
+        "routing": {},
+        "agent_output": {},
+        "human_feedback": None,
+        "error": None,
+        "final_response": {},
+        "awaiting_feedback": False,
+        "rag_context": "",
+        "rag_citations": [],
+        "rag_found": False,
+    }
+
+    if not existing_state:
+        input_state["agent_outputs_history"] = []
+
+    try:
+        result = await asyncio.to_thread(graph.invoke, input_state, graph_config)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Orchestration error: {exc}")
+
+    final = result.get("final_response") or {}
+    routing = result.get("routing") or {}
+    agent_output = result.get("agent_output") or {}
+    rag_found = result.get("rag_found", False)
+    rag_citations = result.get("rag_citations", [])
+
+    is_interrupted = (
+        not final.get("response_text")
+        and agent_output.get("response_text")
+    )
+
+    if is_interrupted:
+        response_text = agent_output.get("response_text", "")
+        agent_name_val = agent_output.get("agent_name", "unknown")
+        citations_val = agent_output.get("citations", [])
+        structured_val = agent_output.get("structured_data", {})
+        next_action_val = agent_output.get("next_action", "continue")
+        awaiting = True
+    else:
+        response_text = final.get("response_text", "No response generated.")
+        agent_name_val = final.get("agent_name", "unknown")
+        citations_val = final.get("citations", [])
+        structured_val = final.get("structured_data", {})
+        next_action_val = final.get("next_action", "continue")
+        awaiting = False
+
+    # Step 4: TTS
+    audio_b64 = ""
+    if response_text:
+        try:
+            tts_bytes = await voice.text_to_speech(response_text)
+            audio_b64 = b64mod.b64encode(tts_bytes).decode("utf-8")
+        except Exception as tts_exc:
+            pass  # TTS failure is non-fatal
+
+    return OrchestratorVoiceResponse(
+        session_id=session_id,
+        transcript=transcript,
+        agent_name=agent_name_val,
+        response_text=response_text,
+        structured_data=structured_val,
+        citations=citations_val,
+        next_action=next_action_val,
+        route_used=routing.get("route", ""),
+        intent=routing.get("intent", ""),
+        awaiting_feedback=awaiting,
+        turn_count=turn_count,
+        rag_found=rag_found,
+        rag_citations_count=len(rag_citations),
+        audio_base64=audio_b64,
+    )
+
+
 @app.post("/api/chat/feedback", response_model=OrchestratorChatResponse)
 def orchestrator_feedback(req: OrchestratorFeedbackRequest):
     """Resume graph execution after human-in-the-loop feedback.
@@ -1902,6 +2070,9 @@ def orchestrator_feedback(req: OrchestratorFeedbackRequest):
     agent_output = result.get("agent_output") or {}
     turn_count = result.get("session", {}).get("turn_count", 0)
 
+    rag_found = result.get("rag_found", False)
+    rag_citations = result.get("rag_citations", [])
+
     # Check if the graph paused again (e.g., revise → agent → HITL again)
     is_interrupted = (
         not final.get("response_text")
@@ -1920,6 +2091,8 @@ def orchestrator_feedback(req: OrchestratorFeedbackRequest):
             intent=routing.get("intent", ""),
             awaiting_feedback=True,
             turn_count=turn_count,
+            rag_found=rag_found,
+            rag_citations_count=len(rag_citations),
         )
 
     return OrchestratorChatResponse(
@@ -1933,4 +2106,6 @@ def orchestrator_feedback(req: OrchestratorFeedbackRequest):
         intent=routing.get("intent", ""),
         awaiting_feedback=False,
         turn_count=turn_count,
+        rag_found=rag_found,
+        rag_citations_count=len(rag_citations),
     )

@@ -5,12 +5,16 @@ through the Manager → specialist agents → response assembly pipeline.
 
 Graph flow:
     START → manager → [route_from_manager]
-                       ├→ professor → [route_after_agent] → respond | manager
-                       ├→ ta_problem_gen → [route_after_agent] → respond | manager
-                       ├→ ta_problem_solve → [route_after_agent] → respond | manager
-                       ├→ rag → [route_after_agent] → respond | manager
-                       ├→ human_feedback → manager
+                       ├→ professor → [route_after_agent] → respond | manager | human_feedback
+                       ├→ ta_problem_gen → [route_after_agent] → respond | manager | human_feedback
+                       ├→ ta_problem_solve → [route_after_agent] → respond | manager | human_feedback
+                       ├→ rag → [route_after_agent] → respond | manager | human_feedback
                        └→ respond → END
+
+    human_feedback (HITL interrupt) → manager (re-evaluate with feedback)
+
+Note: human_feedback is only reachable via route_after_agent (when
+session.require_human_review=True), never directly from the manager.
 """
 
 from __future__ import annotations
@@ -68,9 +72,11 @@ def route_from_manager(state: OrchestratorState) -> str:
         return "respond"
 
     # Validate route is a known node
+    # Note: human_feedback is NOT a valid manager route -- it's only
+    # reachable via route_after_agent when session.require_human_review=True
     valid_routes = {
         "professor", "ta_problem_gen", "ta_problem_solve",
-        "rag", "respond", "human_feedback",
+        "rag", "respond",
     }
     if route not in valid_routes:
         logger.warning("Unknown route '%s'; falling back to respond.", route)
@@ -96,8 +102,9 @@ def route_after_agent(state: OrchestratorState) -> str:
     if next_action in ("route_problem_ta", "route_planner"):
         return "manager"
 
-    # TA problem solving: escalate or easier_problem → back to manager
-    if next_action in ("escalate", "easier_problem"):
+    # TA problem solving: escalate, easier_problem, or request_hint → back to manager
+    # Manager will route to ta_problem_gen with adjusted difficulty
+    if next_action in ("escalate", "easier_problem", "request_hint"):
         return "manager"
 
     # Error → respond immediately
@@ -133,6 +140,8 @@ def build_orchestration_graph() -> StateGraph:
     graph.add_edge(START, "manager")
 
     # --- Manager → conditional routing to agents ---
+    # Note: human_feedback is NOT reachable from manager. It's only
+    # reachable from agent nodes via route_after_agent.
     graph.add_conditional_edges(
         "manager",
         route_from_manager,
@@ -142,7 +151,6 @@ def build_orchestration_graph() -> StateGraph:
             "ta_problem_solve",
             "rag",
             "respond",
-            "human_feedback",
         ],
     )
 

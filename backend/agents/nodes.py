@@ -43,7 +43,7 @@ _PROBLEM_SOLVE_PATTERNS = [
     re.compile(r"\bhere\s+is\s+my\s+(work|solution|attempt|answer|steps?)", re.I),
 ]
 
-# Priority 2: Problem generation signals
+# Priority 2: Problem generation signals (includes difficulty escalation/de-escalation)
 _PROBLEM_GEN_PATTERNS = [
     re.compile(
         r"\b(give|generate|create|make|write)\s+.*\b"
@@ -56,6 +56,14 @@ _PROBLEM_GEN_PATTERNS = [
     re.compile(r"\b(i\s+want|i\s+need)\s+(to\s+)?practice\b", re.I),
     re.compile(r"\bexercises?\s+(on|for|about)\b", re.I),
     re.compile(r"\bmore\s+exercises?\b", re.I),
+    # Difficulty escalation / de-escalation → still goes to problem_gen
+    re.compile(r"\b(easier|simpler|easy|beginner)\s+(problem|question|exercise)s?\b", re.I),
+    re.compile(r"\b(harder|tougher|difficult|challenging|advanced)\s+(problem|question|exercise)s?\b", re.I),
+    re.compile(r"\b(i\s+want|i\s+need|give\s+me)\s+.{0,20}(easier|harder|simpler|tougher|challenging)\b", re.I),
+    re.compile(r"\btoo\s+(easy|hard|difficult|simple)\b", re.I),
+    re.compile(r"\bchallenge\s+me\b", re.I),
+    re.compile(r"\bstep\s+(it\s+)?up\b", re.I),
+    re.compile(r"\b(easier|harder)\s+one\b", re.I),
 ]
 
 # Priority 3: Planning signals
@@ -234,12 +242,16 @@ def manager_node(state: OrchestratorState) -> dict:
                     confidence=1.0,
                     reasoning="User approved the response",
                 ),
-                "route_history": state.get("route_history", []) + ["respond"],
+                "route_history": ["respond"],
                 "human_feedback": None,
             }
 
         if action == "reroute" and feedback.get("reroute_to"):
             target = feedback["reroute_to"]
+            feedback_text = feedback.get("feedback_text", "")
+            reroute_message = state.get("user_message", "")
+            if feedback_text:
+                reroute_message = f"{reroute_message}\n\n[Student feedback: {feedback_text}]"
             return {
                 "routing": RoutingDecision(
                     intent="feedback_reroute",
@@ -247,7 +259,8 @@ def manager_node(state: OrchestratorState) -> dict:
                     confidence=1.0,
                     reasoning=f"User requested reroute to {target}",
                 ),
-                "route_history": state.get("route_history", []) + [target],
+                "route_history": [target],
+                "user_message": reroute_message,
                 "human_feedback": None,
             }
 
@@ -272,7 +285,7 @@ def manager_node(state: OrchestratorState) -> dict:
                     confidence=1.0,
                     reasoning=f"User requested revision, re-routing to {previous_route}",
                 ),
-                "route_history": state.get("route_history", []) + [previous_route],
+                "route_history": [previous_route],
                 "user_message": revised_message,
                 "human_feedback": None,
             }
@@ -285,31 +298,44 @@ def manager_node(state: OrchestratorState) -> dict:
                 confidence=1.0,
                 reasoning="User cancelled or unknown feedback action",
             ),
-            "route_history": state.get("route_history", []) + ["respond"],
+            "route_history": ["respond"],
             "human_feedback": None,
         }
 
     # --- Check if a previous agent signaled re-routing ---
     agent_output = state.get("agent_output")
-    if agent_output and agent_output.get("next_action") in (
-        "route_problem_ta",
-        "route_planner",
-    ):
-        next_action = agent_output["next_action"]
+    if agent_output:
+        next_action = agent_output.get("next_action", "continue")
+
+        # Explicit agent-to-agent re-routing signals
         route_map = {
             "route_problem_ta": ("problem_gen", "ta_problem_gen"),
             "route_planner": ("planning", "planner"),
         }
-        intent, route = route_map[next_action]
-        return {
-            "routing": RoutingDecision(
-                intent=intent,
-                route=route,
-                confidence=0.95,
-                reasoning=f"Previous agent signaled {next_action}",
-            ),
-            "route_history": state.get("route_history", []) + [route],
-        }
+        if next_action in route_map:
+            intent, route = route_map[next_action]
+            return {
+                "routing": RoutingDecision(
+                    intent=intent,
+                    route=route,
+                    confidence=0.95,
+                    reasoning=f"Previous agent signaled {next_action}",
+                ),
+                "route_history": state.get("route_history", []) + [route],
+            }
+
+        # Problem Solving TA escalation/de-escalation → route to Problem Gen TA
+        # These signals mean the student needs a different difficulty level
+        if next_action in ("easier_problem", "escalate", "request_hint"):
+            return {
+                "routing": RoutingDecision(
+                    intent="difficulty_adjustment",
+                    route="ta_problem_gen",
+                    confidence=0.95,
+                    reasoning=f"Problem Solving TA recommended: {next_action}",
+                ),
+                "route_history": state.get("route_history", []) + ["ta_problem_gen"],
+            }
 
     # --- Fresh classification of user message ---
     user_message = state.get("user_message", "")
@@ -461,49 +487,135 @@ def professor_node(state: OrchestratorState) -> dict:
 # Node: TA Problem Generation
 # ---------------------------------------------------------------------------
 
-def ta_problem_gen_node(state: OrchestratorState) -> dict:
-    """Invoke ProblemGenTATool for practice problem generation.
+def _infer_difficulty_curve(state: OrchestratorState) -> tuple[str, str, list[str]]:
+    """Infer the desired difficulty curve from prior problem_solve output and user message.
 
-    Reads: user_message, user_profile, session
-    Writes: agent_output, agent_outputs_history
+    Returns (current_band, target_band, recent_error_tags).
+
+    Escalation logic:
+    - If problem_solve recommended 'easier_problem' → lower target difficulty
+    - If problem_solve recommended 'escalate' → raise target difficulty
+    - If user explicitly requests easier/harder → adjust accordingly
+    - Otherwise → use adaptive default based on profile level
     """
-    from agents.TA_tools import ProblemGenTATool
-    from db.models import (
-        DifficultyBand,
-        DifficultyCurve,
-        KnowledgeMode,
-        LearnerProfile,
-        ProblemGenTARequest,
+    from db.models import DifficultyBand
+
+    BAND_ORDER = [
+        DifficultyBand.VERY_EASY.value,
+        DifficultyBand.EASY.value,
+        DifficultyBand.MEDIUM.value,
+        DifficultyBand.HARD.value,
+        DifficultyBand.CHALLENGE.value,
+    ]
+
+    # Defaults based on profile level
+    profile = state.get("user_profile", {})
+    level = profile.get("level", "intermediate")
+    level_defaults = {
+        "beginner": (DifficultyBand.VERY_EASY.value, DifficultyBand.EASY.value),
+        "intermediate": (DifficultyBand.EASY.value, DifficultyBand.MEDIUM.value),
+        "advanced": (DifficultyBand.MEDIUM.value, DifficultyBand.HARD.value),
+    }
+    current_band, target_band = level_defaults.get(
+        level, (DifficultyBand.EASY.value, DifficultyBand.MEDIUM.value)
     )
 
+    recent_error_tags: list[str] = []
+
+    # Check previous problem_solve output for escalation signals + error tags
+    prev_output = state.get("agent_output", {})
+    prev_agent = prev_output.get("agent_name", "")
+    prev_action = prev_output.get("next_action", "continue")
+    prev_data = prev_output.get("structured_data", {})
+
+    if prev_agent == "ta_problem_solve":
+        # Extract the last problem's difficulty as "current"
+        # (from the problem that was just graded)
+        for hist in reversed(state.get("agent_outputs_history", [])):
+            if hist.get("agent_name") == "ta_problem_gen":
+                problems = hist.get("structured_data", {}).get("problems", [])
+                if problems:
+                    last_diff = problems[0].get("difficulty", current_band)
+                    if last_diff in BAND_ORDER:
+                        current_band = last_diff
+                break
+
+        # Carry forward detected error tags for targeted problem generation
+        recent_error_tags = prev_data.get("detected_error_tags", [])
+
+        idx = BAND_ORDER.index(current_band) if current_band in BAND_ORDER else 1
+
+        if prev_action == "easier_problem":
+            # Student struggled → lower difficulty
+            target_band = BAND_ORDER[max(0, idx - 1)]
+        elif prev_action == "escalate":
+            # Student is doing well → raise difficulty
+            target_band = BAND_ORDER[min(len(BAND_ORDER) - 1, idx + 1)]
+        elif prev_action == "request_hint":
+            # Needs a hint → stay at same level or slightly easier
+            target_band = current_band
+        else:
+            # Default: aim one step up
+            target_band = BAND_ORDER[min(len(BAND_ORDER) - 1, idx + 1)]
+
+    # Check user message for explicit difficulty requests
+    user_msg = state.get("user_message", "").lower()
+    if any(w in user_msg for w in ("easier", "simpler", "too hard", "too difficult")):
+        idx = BAND_ORDER.index(current_band) if current_band in BAND_ORDER else 1
+        target_band = BAND_ORDER[max(0, idx - 1)]
+    elif any(w in user_msg for w in ("harder", "tougher", "challenge", "too easy")):
+        idx = BAND_ORDER.index(current_band) if current_band in BAND_ORDER else 1
+        target_band = BAND_ORDER[min(len(BAND_ORDER) - 1, idx + 1)]
+
+    return current_band, target_band, recent_error_tags
+
+
+def ta_problem_gen_node(state: OrchestratorState) -> dict:
+    """Invoke the Problem Generation TA agent for practice problem generation.
+
+    Uses the invoke_problem_gen_ta wrapper which handles RAG context
+    retrieval, validation, and citation normalization.
+
+    Dynamically adjusts difficulty based on:
+    - Previous problem_solve output (easier_problem/escalate signals)
+    - User's explicit requests ("easier", "harder")
+    - Detected error tags from grading (for targeted problem generation)
+
+    Reads: user_message, user_profile, session, agent_output, agent_outputs_history
+    Writes: agent_output, agent_outputs_history, rag_found, rag_citations
+    """
     profile_data = state.get("user_profile", {})
     session = state.get("session", {})
 
     try:
-        request = ProblemGenTARequest(
-            request_id=uuid4().hex,
-            user_id=profile_data.get("user_id", "anonymous"),
-            session_id=session.get("session_id", uuid4().hex),
-            topic=session.get("topic", "general"),
-            profile=LearnerProfile(
-                level=profile_data.get("level", "intermediate"),
-                learning_style=profile_data.get("learning_style", "mixed"),
-                pace=profile_data.get("pace", "medium"),
-            ),
-            mode=KnowledgeMode(session.get("knowledge_mode", "internal_only")),
-            desired_difficulty_curve=DifficultyCurve(
-                current=DifficultyBand.EASY,
-                target=DifficultyBand.MEDIUM,
-            ),
-            num_problems=3,
-        )
+        from agents.problem_gen_ta_agent import invoke_problem_gen_ta
 
-        tool = ProblemGenTATool()
-        raw_result = tool._run(request.model_dump(mode="json"))
-        result = json.loads(raw_result)
+        # Infer difficulty curve from context (escalation/de-escalation)
+        current_band, target_band, recent_error_tags = _infer_difficulty_curve(state)
 
-        if "error" in result:
-            raise ValueError(result["error"])
+        payload = {
+            "request_id": uuid4().hex,
+            "user_id": profile_data.get("user_id", "anonymous"),
+            "session_id": session.get("session_id", uuid4().hex),
+            "topic": session.get("topic", "general"),
+            "profile": {
+                "level": profile_data.get("level", "intermediate"),
+                "learning_style": profile_data.get("learning_style", "mixed"),
+                "pace": profile_data.get("pace", "medium"),
+            },
+            "mode": session.get("knowledge_mode", "internal_only"),
+            "desired_difficulty_curve": {
+                "current": current_band,
+                "target": target_band,
+            },
+            "num_problems": 3,
+        }
+
+        # Forward error tags from problem_solve for targeted generation
+        if recent_error_tags:
+            payload["recent_error_tags"] = recent_error_tags
+
+        result = invoke_problem_gen_ta(payload)
 
         # Build user-friendly response text from generated problems
         problems = result.get("problems", [])
@@ -515,11 +627,18 @@ def ta_problem_gen_node(state: OrchestratorState) -> dict:
             )
         response_text = "\n\n".join(response_parts)
 
+        citations = result.get("citations", [])
+        # Convert CitationRef dicts to simpler format for graph state
+        simple_citations = []
+        for c in citations:
+            if isinstance(c, dict):
+                simple_citations.append(c)
+
         output = AgentOutput(
             agent_name="ta_problem_gen",
             response_text=response_text,
             structured_data=result,
-            citations=result.get("citations", []),
+            citations=simple_citations,
             next_action="continue",
             error=None,
         )
@@ -527,6 +646,8 @@ def ta_problem_gen_node(state: OrchestratorState) -> dict:
         return {
             "agent_output": output,
             "agent_outputs_history": state.get("agent_outputs_history", []) + [output],
+            "rag_found": bool(simple_citations),
+            "rag_citations": simple_citations,
         }
 
     except Exception as exc:
@@ -550,36 +671,30 @@ def ta_problem_gen_node(state: OrchestratorState) -> dict:
 # ---------------------------------------------------------------------------
 
 def ta_problem_solve_node(state: OrchestratorState) -> dict:
-    """Invoke ProblemSolvingTATool for grading student work.
+    """Invoke the Problem Solving TA agent for grading student work.
+
+    Uses the invoke_problem_solve_ta wrapper which handles RAG context
+    retrieval, validation, step verdicts, and citation normalization.
 
     Reads: user_message, user_profile, session, agent_outputs_history
-    Writes: agent_output, agent_outputs_history
+    Writes: agent_output, agent_outputs_history, rag_found, rag_citations
 
     Note: This node needs structured input (scan_parse, rubric, problem_ref).
-    For Phase 0, it extracts what it can from the user message and prior
-    problem generation output. Full structured input comes from the frontend
-    in production.
+    It extracts what it can from the user message and prior problem_gen
+    output. Full structured input comes from the frontend in production.
     """
-    from agents.TA_tools import ProblemSolvingTATool
-    from db.models import (
-        KnowledgeMode,
-        LearnerProfile,
-        ProblemReference,
-        ProblemSolvingTARequest,
-        RubricCriterion,
-        ScanParseInput,
-        StudentStep,
-    )
-
     profile_data = state.get("user_profile", {})
     session = state.get("session", {})
     user_message = state.get("user_message", "")
 
     try:
+        from agents.problem_solve_ta_agent import invoke_problem_solve_ta
+
         # Try to find problem context from prior problem_gen output
         topic = session.get("topic", "general")
         problem_id = session.get("current_problem_id")
         problem_statement = None
+        rubric_hooks = []
 
         for prev_output in reversed(state.get("agent_outputs_history", [])):
             if prev_output.get("agent_name") == "ta_problem_gen":
@@ -590,59 +705,61 @@ def ta_problem_solve_node(state: OrchestratorState) -> dict:
                     problem_id = problem_id or first_problem.get("problem_id")
                     problem_statement = first_problem.get("statement")
                     topic = first_problem.get("topic", topic)
+                    rubric_hooks = first_problem.get("rubric_hooks", [])
                 break
 
-        request = ProblemSolvingTARequest(
-            request_id=uuid4().hex,
-            user_id=profile_data.get("user_id", "anonymous"),
-            attempt_id=uuid4().hex,
-            session_id=session.get("session_id", uuid4().hex),
-            profile=LearnerProfile(
-                level=profile_data.get("level", "intermediate"),
-                learning_style=profile_data.get("learning_style", "mixed"),
-                pace=profile_data.get("pace", "medium"),
-            ),
-            mode=KnowledgeMode(session.get("knowledge_mode", "internal_only")),
-            problem_ref=ProblemReference(
-                problem_id=problem_id or uuid4().hex,
-                statement=problem_statement,
-                topic=topic,
-            ),
-            scan_parse=ScanParseInput(
-                problem_statement=problem_statement,
-                steps=[
-                    StudentStep(
-                        step_index=1,
-                        content=user_message,
-                    ),
+        # Build rubric from problem_gen rubric_hooks or use defaults
+        rubric = []
+        if rubric_hooks:
+            for hook in rubric_hooks:
+                if isinstance(hook, dict):
+                    rubric.append(hook)
+        if not rubric:
+            rubric = [
+                {
+                    "criterion_id": "method_selection",
+                    "description": "Chooses an appropriate method.",
+                    "max_points": 3,
+                },
+                {
+                    "criterion_id": "procedure_execution",
+                    "description": "Executes steps in a valid order.",
+                    "max_points": 4,
+                },
+                {
+                    "criterion_id": "justification",
+                    "description": "Justifies key transitions.",
+                    "max_points": 3,
+                },
+            ]
+
+        payload = {
+            "request_id": uuid4().hex,
+            "user_id": profile_data.get("user_id", "anonymous"),
+            "attempt_id": uuid4().hex,
+            "session_id": session.get("session_id", uuid4().hex),
+            "profile": {
+                "level": profile_data.get("level", "intermediate"),
+                "learning_style": profile_data.get("learning_style", "mixed"),
+                "pace": profile_data.get("pace", "medium"),
+            },
+            "mode": session.get("knowledge_mode", "internal_only"),
+            "problem_ref": {
+                "problem_id": problem_id or uuid4().hex,
+                "statement": problem_statement,
+                "topic": topic,
+            },
+            "scan_parse": {
+                "problem_statement": problem_statement,
+                "steps": [
+                    {"step_index": 1, "content": user_message},
                 ],
-                final_answer=user_message,
-            ),
-            rubric=[
-                RubricCriterion(
-                    criterion_id="method_selection",
-                    description="Chooses an appropriate method.",
-                    max_points=3,
-                ),
-                RubricCriterion(
-                    criterion_id="procedure_execution",
-                    description="Executes steps in a valid order.",
-                    max_points=4,
-                ),
-                RubricCriterion(
-                    criterion_id="justification",
-                    description="Justifies key transitions.",
-                    max_points=3,
-                ),
-            ],
-        )
+                "final_answer": user_message,
+            },
+            "rubric": rubric,
+        }
 
-        tool = ProblemSolvingTATool()
-        raw_result = tool._run(request.model_dump(mode="json"))
-        result = json.loads(raw_result)
-
-        if "error" in result:
-            raise ValueError(result["error"])
+        result = invoke_problem_solve_ta(payload)
 
         response_text = result.get("feedback_message", "Evaluation complete.")
         verdict = result.get("overall_verdict", "")
@@ -655,11 +772,17 @@ def ta_problem_solve_node(state: OrchestratorState) -> dict:
                 f"{response_text}"
             )
 
+        citations = result.get("citations", [])
+        simple_citations = []
+        for c in citations:
+            if isinstance(c, dict):
+                simple_citations.append(c)
+
         output = AgentOutput(
             agent_name="ta_problem_solve",
             response_text=response_text,
             structured_data=result,
-            citations=result.get("citations", []),
+            citations=simple_citations,
             next_action=result.get("recommended_next_action", "continue"),
             error=None,
         )
@@ -667,6 +790,8 @@ def ta_problem_solve_node(state: OrchestratorState) -> dict:
         return {
             "agent_output": output,
             "agent_outputs_history": state.get("agent_outputs_history", []) + [output],
+            "rag_found": bool(simple_citations),
+            "rag_citations": simple_citations,
         }
 
     except Exception as exc:
