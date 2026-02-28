@@ -20,14 +20,17 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
   const level = localStorage.getItem("preferred_level") ?? "Beginner";
   const authUser = getAuthUser();
   const isAuthenticated = Boolean(getAccessToken() && authUser);
+  const displayName = isAuthenticated ? authUser?.display_name ?? "Student" : "Guest";
+  const roleLabel = isAuthenticated ? authUser?.role ?? "student" : level;
+  const avatarInitial = (displayName?.trim().charAt(0) || "G").toUpperCase();
 
   const handleExit = () => {
     if (isAuthenticated) {
       clearAuthSession();
-      navigate("/login");
+      navigate("/", { replace: true });
       return;
     }
-    navigate("/");
+    navigate("/", { replace: true });
   };
 
   return (
@@ -41,18 +44,33 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
           </div>
         </div>
 
+        <div className="sidebar-profile">
+          <div className="sidebar-avatar">{avatarInitial}</div>
+          <div className="sidebar-profile-copy">
+            <strong>{displayName}</strong>
+            <small>{roleLabel}</small>
+          </div>
+        </div>
+
         <div className="user-status">
-          <span>{isAuthenticated ? authUser?.display_name : level}</span>
-          <small>{isAuthenticated ? authUser?.role : "Guest"}</small>
+          <span>Current level</span>
+          <strong>{level}</strong>
         </div>
 
         <nav className="side-nav">
           {NAV_ITEMS.map((item) => (
             <NavLink key={item.label} to={item.to} className="side-link">
+              <span className="side-link-dot" />
               {item.label}
             </NavLink>
           ))}
         </nav>
+
+        <div className="sidebar-note">
+          <p>Today&apos;s focus</p>
+          <strong>Productive Struggle</strong>
+          <span>Small hints. Strong understanding.</span>
+        </div>
 
         <button className="btn-muted side-cta" onClick={handleExit} type="button">
           {isAuthenticated ? "Log Out" : "Exit Session"}
@@ -61,13 +79,18 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
 
       <section className="shell-main">
         <header className="shell-topbar">
-          <label className="search-wrap">
-            <span>Search</span>
-            <input placeholder="Search topic or concept..." />
-          </label>
-          <div className="topbar-badges">
+          <div className="topbar-left">
+            <label className="search-wrap">
+              <span>Search concepts</span>
+              <input placeholder="Try: derivatives, factoring, equation setup, common mistakes..." />
+            </label>
+          </div>
+          <div className="topbar-actions">
             <span className="pill good">Live Coaching</span>
             <span className="pill warm">Productive Struggle</span>
+            <button className="btn-muted topbar-cta" onClick={() => navigate("/home#create-course")} type="button">
+              Create Course
+            </button>
           </div>
         </header>
 

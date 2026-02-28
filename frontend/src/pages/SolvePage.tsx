@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getAttempt, getIntervention, postEvents } from "../api";
+import { AppIcon } from "../components/AppIcon";
 import { AppShell } from "../components/AppShell";
 import { CoachPanel } from "../components/CoachPanel";
 import type { Attempt, ClientEvent, Intervention, StuckSignals } from "../types";
@@ -201,7 +202,10 @@ export function SolvePage() {
 
           <div className="action-row">
             <button className="btn-muted" onClick={eraseOne} type="button">
-              ⌫ Erase Last
+              <span className="inline-icon">
+                <AppIcon className="inline-icon-svg" name="erase" />
+              </span>
+              Erase Last
             </button>
           </div>
 

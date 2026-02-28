@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getSummary } from "../api";
+import { getSummary, postDailyProgressEvent } from "../api";
+import { getAccessToken, getAuthUser } from "../auth";
+import { AppIcon, type AppIconName } from "../components/AppIcon";
 import { AppShell } from "../components/AppShell";
 import type { Summary } from "../types";
+import { markAttemptSummary } from "../utils/dailyProgress";
 
 function formatSeconds(value: number | null): string {
   if (value === null) {
@@ -26,17 +29,17 @@ function tlDotClass(type: string): string {
   return "tl-dot start";
 }
 
-function tlIcon(type: string): string {
+function tlIcon(type: string): AppIconName {
   if (type === "attempt_start") {
-    return "▶";
+    return "timeline-start";
   }
   if (type === "intervention") {
-    return "💡";
+    return "timeline-intervention";
   }
   if (type === "solved") {
-    return "✓";
+    return "timeline-solved";
   }
-  return "•";
+  return "timeline-default";
 }
 
 export function ResultPage() {
@@ -45,6 +48,7 @@ export function ResultPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const didSyncRef = useRef(false);
 
   useEffect(() => {
     if (!attemptId) {
@@ -57,6 +61,41 @@ export function ResultPage() {
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [attemptId]);
+
+  useEffect(() => {
+    if (!summary || !attemptId || didSyncRef.current) {
+      return;
+    }
+    const solved = summary.metrics.time_to_solve_sec !== null;
+    const hasAuth = Boolean(getAccessToken() && getAuthUser());
+
+    if (hasAuth) {
+      const tasks: Promise<unknown>[] = [];
+      if (solved) {
+        tasks.push(
+          postDailyProgressEvent({
+            event_type: "session_solved",
+            attempt_id: attemptId
+          })
+        );
+      }
+      if (summary.metrics.hint_max_level > 0) {
+        tasks.push(
+          postDailyProgressEvent({
+            event_type: "coached_session",
+            attempt_id: attemptId
+          })
+        );
+      }
+      Promise.all(tasks).finally(() => {
+        didSyncRef.current = true;
+      });
+      return;
+    }
+
+    markAttemptSummary(attemptId, solved, summary.metrics.hint_max_level);
+    didSyncRef.current = true;
+  }, [summary, attemptId]);
 
   const didSolve =
     summary?.metrics.time_to_solve_sec !== null && summary?.metrics.time_to_solve_sec !== undefined;
@@ -83,7 +122,9 @@ export function ResultPage() {
         <section className="panel-card result-page-inner">
           {didSolve && wasReallyStuck && (
             <div className="insight-banner hard">
-              <span className="insight-icon">🔥</span>
+              <span className="insight-icon">
+                <AppIcon className="insight-icon-svg" name="insight-hard" />
+              </span>
               <span>
                 Stuck score hit <strong>{summary.metrics.max_stuck}/100</strong> and you still solved it.
                 Great productive struggle.
@@ -92,7 +133,9 @@ export function ResultPage() {
           )}
           {didSolve && !wasReallyStuck && (
             <div className="insight-banner">
-              <span className="insight-icon">✅</span>
+              <span className="insight-icon">
+                <AppIcon className="insight-icon-svg" name="insight-good" />
+              </span>
               <span>
                 Solved in <strong>{formatSeconds(summary.metrics.time_to_solve_sec)}</strong> with stable
                 momentum.
@@ -132,7 +175,9 @@ export function ResultPage() {
             <ul className="timeline">
               {summary.timeline.map((entry) => (
                 <li key={`${entry.type}-${entry.at}`}>
-                  <span className={tlDotClass(entry.type)}>{tlIcon(entry.type)}</span>
+                  <span className={tlDotClass(entry.type)}>
+                    <AppIcon className="tl-icon-svg" name={tlIcon(entry.type)} />
+                  </span>
                   <div className="tl-body">
                     <strong>{entry.label}</strong>
                     <span>{new Date(entry.at).toLocaleTimeString()}</span>

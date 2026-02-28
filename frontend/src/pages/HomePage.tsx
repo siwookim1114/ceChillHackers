@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createAttempt, getMe, listProblems } from "../api";
+import { createAttempt, getDailyProgress, getMe, listProblems, postDailyProgressEvent } from "../api";
 import { clearAuthSession, getAccessToken, getAuthUser, saveAuthSession } from "../auth";
 import { AppShell } from "../components/AppShell";
 import type { AuthUser, Problem } from "../types";
+import { getDailyProgressSnapshot, markCourseCreated } from "../utils/dailyProgress";
 
 const TOPIC_SUGGESTIONS = [
   "Differentiation Basics",
@@ -12,6 +13,49 @@ const TOPIC_SUGGESTIONS = [
   "Creative Writing",
   "Public Speaking"
 ];
+
+type DashboardProgressState = {
+  solvedSessions: number;
+  createdCourses: number;
+  coachedSessions: number;
+  dailyTargetSessions: number;
+  currentCourseTopic: string | null;
+};
+
+const DEFAULT_PROGRESS_STATE: DashboardProgressState = {
+  solvedSessions: 0,
+  createdCourses: 0,
+  coachedSessions: 0,
+  dailyTargetSessions: 2,
+  currentCourseTopic: null
+};
+
+function readLocalProgress(): DashboardProgressState {
+  const snapshot = getDailyProgressSnapshot();
+  return {
+    solvedSessions: snapshot.solvedSessions,
+    createdCourses: snapshot.createdCourses,
+    coachedSessions: snapshot.coachedSessions,
+    dailyTargetSessions: 2,
+    currentCourseTopic: localStorage.getItem("current_course_topic")
+  };
+}
+
+function toProgressState(payload: {
+  solved_sessions: number;
+  created_courses: number;
+  coached_sessions: number;
+  daily_target_sessions: number;
+  current_course_topic: string | null;
+}): DashboardProgressState {
+  return {
+    solvedSessions: payload.solved_sessions,
+    createdCourses: payload.created_courses,
+    coachedSessions: payload.coached_sessions,
+    dailyTargetSessions: payload.daily_target_sessions,
+    currentCourseTopic: payload.current_course_topic
+  };
+}
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -25,6 +69,9 @@ export function HomePage() {
   const [courseTopic, setCourseTopic] = useState("Custom Course");
   const [coursePrompt, setCoursePrompt] = useState("");
   const [courseAnswer, setCourseAnswer] = useState("");
+  const [dailyProgress, setDailyProgress] = useState<DashboardProgressState>(
+    DEFAULT_PROGRESS_STATE
+  );
 
   const level = localStorage.getItem("preferred_level") ?? "Beginner";
   const style = localStorage.getItem("preferred_style") ?? "Socratic";
@@ -54,6 +101,45 @@ export function HomePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+    if (getAccessToken() && user) {
+      getDailyProgress()
+        .then((progress) => setDailyProgress(toProgressState(progress)))
+        .catch(() => setDailyProgress(readLocalProgress()));
+      return;
+    }
+    setDailyProgress(readLocalProgress());
+  }, [authLoading, user]);
+
+  useEffect(() => {
+    const refreshDailyProgress = () => {
+      if (getAccessToken() && user) {
+        getDailyProgress()
+          .then((progress) => setDailyProgress(toProgressState(progress)))
+          .catch(() => setDailyProgress(readLocalProgress()));
+      } else {
+        setDailyProgress(readLocalProgress());
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshDailyProgress();
+      }
+    };
+
+    window.addEventListener("focus", refreshDailyProgress);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", refreshDailyProgress);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [user]);
+
   const getActorId = () => {
     if (user) {
       return `user_${user.id}`;
@@ -72,6 +158,21 @@ export function HomePage() {
     setError(null);
     try {
       const attempt = await createAttempt({ guest_id: getActorId(), problem_id: problemId });
+      const selectedProblem = problems.find((problem) => problem.id === problemId);
+      if (selectedProblem) {
+        if (getAccessToken() && user) {
+          postDailyProgressEvent({
+            event_type: "set_current_topic",
+            topic: selectedProblem.unit
+          })
+            .then((progress) => setDailyProgress(toProgressState(progress)))
+            .catch(() => {
+              // Keep practice flow uninterrupted when progress sync fails.
+            });
+        } else {
+          localStorage.setItem("current_course_topic", selectedProblem.unit);
+        }
+      }
       navigate(`/solve/${attempt.attempt_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start attempt");
@@ -99,6 +200,23 @@ export function HomePage() {
         answer_key: courseAnswer.trim(),
         unit: courseTopic.trim() || "Custom Course"
       });
+      const createdTopic = courseTopic.trim() || "Custom Course";
+      if (getAccessToken() && user) {
+        try {
+          const progress = await postDailyProgressEvent({
+            event_type: "course_created",
+            attempt_id: attempt.attempt_id,
+            topic: createdTopic
+          });
+          setDailyProgress(toProgressState(progress));
+        } catch {
+          // Keep attempt creation successful even if progress sync fails.
+        }
+      } else {
+        markCourseCreated(attempt.attempt_id);
+        setDailyProgress(readLocalProgress());
+        localStorage.setItem("current_course_topic", createdTopic);
+      }
       navigate(`/solve/${attempt.attempt_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create course");
@@ -111,6 +229,44 @@ export function HomePage() {
     setCourseTopic(topic);
     setCoursePrompt(`Teach me ${topic}. Give me one guided practice problem.`);
   };
+
+  const profileState = user ? "Synced account" : "Guest mode";
+  const problemCountText = loading ? "..." : `${problems.length}`;
+  const hintPolicyLabel = style === "Socratic" ? "Question-first hints" : `${style} hints`;
+  const solvedSessions = dailyProgress.solvedSessions;
+  const createdCourses = dailyProgress.createdCourses;
+  const coachedSessions = dailyProgress.coachedSessions;
+  const currentTrack =
+    dailyProgress.currentCourseTopic ??
+    localStorage.getItem("current_course_topic") ??
+    `${level} Track`;
+  const dailySessionTarget = Math.max(1, dailyProgress.dailyTargetSessions || 2);
+  const trackGoal = Math.max(3, Math.min(6, problems.length || 3));
+  const trackProgress = Math.min(trackGoal, solvedSessions);
+  const trackPercent = Math.round((trackProgress / trackGoal) * 100);
+
+  const dailyTasks = [
+    {
+      id: "sessions",
+      label: `Finish ${dailySessionTarget} practice sessions`,
+      status: `${solvedSessions}/${dailySessionTarget}`,
+      done: solvedSessions >= dailySessionTarget
+    },
+    {
+      id: "course",
+      label: "Create 1 custom course",
+      status: `${createdCourses}/1`,
+      done: createdCourses >= 1
+    },
+    {
+      id: "coach",
+      label: "Use AI coaching at least once",
+      status: `${coachedSessions}/1`,
+      done: coachedSessions >= 1
+    }
+  ];
+  const completedTaskCount = dailyTasks.filter((task) => task.done).length;
+  const dailyCompletionPercent = Math.round((completedTaskCount / dailyTasks.length) * 100);
 
   if (authLoading) {
     return (
@@ -135,10 +291,10 @@ export function HomePage() {
       }
     >
       <div className="home-dashboard">
-        <section className="promo-banner">
+        <section className="promo-banner reveal reveal-1">
           <div>
             <p className="overline">Adaptive Session</p>
-            <h3>Build a custom course, then solve with live AI coaching</h3>
+            <h3>Build a custom course, then solve with real-time AI coaching</h3>
             <p>
               Level: <strong>{level}</strong> · Style: <strong>{style}</strong>
             </p>
@@ -152,9 +308,69 @@ export function HomePage() {
           </button>
         </section>
 
+        <section className="home-kpi-grid reveal reveal-2">
+          <article className="home-kpi-card">
+            <small>Profile</small>
+            <strong>{profileState}</strong>
+            <p>{user ? `Welcome, ${user.display_name}.` : "You can switch to account mode anytime."}</p>
+          </article>
+          <article className="home-kpi-card">
+            <small>Available problems</small>
+            <strong>{problemCountText}</strong>
+            <p>Ready to launch with event tracking.</p>
+          </article>
+          <article className="home-kpi-card">
+            <small>Hint strategy</small>
+            <strong>{hintPolicyLabel}</strong>
+            <p>Smallest helpful intervention first.</p>
+          </article>
+        </section>
+
         {error && <p className="error">{error}</p>}
 
-        <section className="home-grid">
+        <section className="progress-task-grid reveal reveal-3" id="results">
+          <article className="panel-card progress-overview-card">
+            <div className="progress-overview-head">
+              <div>
+                <p className="overline">In Progress Course</p>
+                <h3>{currentTrack}</h3>
+              </div>
+              <span className="progress-percent">{trackPercent}%</span>
+            </div>
+            <p className="progress-helper">
+              Keep momentum daily. Complete your target set before starting new units.
+            </p>
+            <div className="progress-bar-track">
+              <div className="progress-bar-fill" style={{ width: `${trackPercent}%` }} />
+            </div>
+            <div className="progress-meta-row">
+              <span>
+                {trackProgress}/{trackGoal} sessions completed today
+              </span>
+              <span>{coachedSessions} coached sessions</span>
+            </div>
+          </article>
+
+          <article className="panel-card daily-task-card">
+            <div className="daily-task-head">
+              <h3>Daily Tasks</h3>
+              <span className="daily-task-percent">{dailyCompletionPercent}% done</span>
+            </div>
+            <ul className="daily-task-list">
+              {dailyTasks.map((task) => (
+                <li key={task.id} className={task.done ? "done" : ""}>
+                  <span className="task-check" aria-hidden="true" />
+                  <div>
+                    <strong>{task.label}</strong>
+                    <small>{task.status}</small>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </article>
+        </section>
+
+        <section className="home-grid reveal reveal-4">
           <div className="panel-card problem-catalog" id="practice">
             <div className="home-header">
               <h3>My Practice Subjects</h3>
@@ -186,7 +402,7 @@ export function HomePage() {
                     onClick={() => startPractice(problem.id)}
                     type="button"
                   >
-                    {launchingId === problem.id ? "Starting…" : "Start Practice →"}
+                    {launchingId === problem.id ? "Starting..." : "Start Practice"}
                   </button>
                 </article>
               ))}
@@ -241,12 +457,12 @@ export function HomePage() {
             </div>
 
             <button className="btn-teal" onClick={createCustomCourse} disabled={creatingCourse} type="button">
-              {creatingCourse ? "Creating…" : "Create Course & Start →"}
+              {creatingCourse ? "Creating..." : "Create Course & Start"}
             </button>
           </aside>
         </section>
 
-        <section className="panel-card mini-cards" id="results">
+        <section className="panel-card mini-cards reveal reveal-5">
           <article>
             <h4>Study Plan</h4>
             <p>Track sessions by topic, stuck score trends, and hint level usage.</p>

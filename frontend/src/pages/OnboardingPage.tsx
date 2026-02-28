@@ -1,16 +1,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { AppIcon, type AppIconName } from "../components/AppIcon";
 
-const LEVELS: Array<{ value: string; icon: string; label: string; desc: string }> = [
-  { value: "Beginner", icon: "🌱", label: "Beginner", desc: "New to this topic" },
-  { value: "Intermediate", icon: "🔥", label: "Intermediate", desc: "Some experience" },
-  { value: "Advanced", icon: "⚡", label: "Advanced", desc: "Comfortable with concepts" },
+const LEVELS: Array<{ value: string; icon: AppIconName; label: string; desc: string }> = [
+  { value: "Beginner", icon: "level-beginner", label: "Beginner", desc: "New to this topic" },
+  { value: "Intermediate", icon: "level-intermediate", label: "Intermediate", desc: "Some experience" },
+  { value: "Advanced", icon: "level-advanced", label: "Advanced", desc: "Comfortable with concepts" },
 ];
 
-const STYLES: Array<{ value: string; icon: string; label: string; desc: string }> = [
-  { value: "Socratic", icon: "❓", label: "Socratic", desc: "Guide me with questions" },
-  { value: "Step-by-step", icon: "📍", label: "Step-by-step", desc: "Break it down for me" },
-  { value: "Concept-first", icon: "💡", label: "Concept-first", desc: "Explain the big idea" },
+const STYLES: Array<{ value: string; icon: AppIconName; label: string; desc: string }> = [
+  { value: "Socratic", icon: "style-socratic", label: "Socratic", desc: "Guide me with questions" },
+  { value: "Step-by-step", icon: "style-step", label: "Step-by-step", desc: "Break it down for me" },
+  { value: "Concept-first", icon: "style-concept", label: "Concept-first", desc: "Explain the big idea" },
 ];
 
 export function OnboardingPage() {
@@ -45,7 +46,9 @@ export function OnboardingPage() {
                 onClick={() => setLevel(item.value)}
                 type="button"
               >
-                <span className="opt-icon">{item.icon}</span>
+                <span className="opt-icon">
+                  <AppIcon name={item.icon} />
+                </span>
                 <span className="opt-label">{item.label}</span>
                 <span className="opt-desc">{item.desc}</span>
               </button>
@@ -63,7 +66,9 @@ export function OnboardingPage() {
                 onClick={() => setStyle(item.value)}
                 type="button"
               >
-                <span className="opt-icon">{item.icon}</span>
+                <span className="opt-icon">
+                  <AppIcon name={item.icon} />
+                </span>
                 <span className="opt-label">{item.label}</span>
                 <span className="opt-desc">{item.desc}</span>
               </button>
