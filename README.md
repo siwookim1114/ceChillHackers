@@ -43,6 +43,17 @@ Connection check:
 psql "postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@localhost:5432/<POSTGRES_DB>" -c "select 1;"
 ```
 
+## Shared RDS connection
+
+Set `DATABASE_URL` in `.env`:
+
+```bash
+DATABASE_URL=postgresql://postgres:<DB_PASSWORD>@team-shared-pg.cebg4w0q26rg.us-east-1.rds.amazonaws.com:5432/postgres
+```
+
+Backend now uses PostgreSQL automatically when `DATABASE_URL` is present.
+Without `DATABASE_URL`, it falls back to in-memory storage.
+
 ## Run locally
 
 ### Backend
