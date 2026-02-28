@@ -261,6 +261,78 @@ textarea {
   gap: 8px;
 }
 
+.avatar-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  display: grid;
+  gap: 10px;
+}
+
+.avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar-face {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: linear-gradient(155deg, #f6be98, #f2d6c1);
+  border: 1px solid rgba(23, 35, 41, 0.2);
+  position: relative;
+  box-shadow: inset 0 -6px 12px rgba(23, 35, 41, 0.08);
+}
+
+.avatar-face .eye {
+  position: absolute;
+  top: 24px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2d2924;
+}
+
+.avatar-face .eye.left {
+  left: 18px;
+}
+
+.avatar-face .eye.right {
+  right: 18px;
+}
+
+.avatar-face .mouth {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  width: 20px;
+  height: 7px;
+  margin-left: -10px;
+  border-radius: 10px;
+  background: #9e4d2f;
+  transition: height 0.12s ease, border-radius 0.12s ease;
+}
+
+.avatar-face.speaking .mouth {
+  height: 13px;
+  border-radius: 8px;
+  animation: talk 0.24s ease-in-out infinite alternate;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+}
+
 .timeline {
   list-style: none;
   margin: 12px 0 0;
@@ -295,6 +367,15 @@ textarea {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes talk {
+  from {
+    transform: scaleY(0.8);
+  }
+  to {
+    transform: scaleY(1.15);
   }
 }
 
