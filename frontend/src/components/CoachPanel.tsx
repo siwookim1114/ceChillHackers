@@ -1,4 +1,5 @@
 import type { Intervention, StuckSignals } from "../types";
+import { AvatarTutor } from "./AvatarTutor";
 
 type CoachPanelProps = {
   signals: StuckSignals;
@@ -55,6 +56,8 @@ export function CoachPanel({ signals, intervention }: CoachPanelProps) {
         <p>{intervention?.reason ?? "No intervention yet."}</p>
         <p>{intervention?.tutor_message ?? "Keep writing your reasoning to receive adaptive hints."}</p>
       </div>
+
+      <AvatarTutor intervention={intervention} />
     </aside>
   );
 }
