@@ -5,6 +5,8 @@ import type {
   AuthResponse,
   AuthUser,
   ClientEvent,
+  DailyProgress,
+  DailyProgressEventType,
   EventBatchResponse,
   Intervention,
   LearningPace,
@@ -14,7 +16,7 @@ import type {
   UserRole
 } from "./types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 function parseErrorText(raw: string): string {
   if (!raw) {
@@ -37,7 +39,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  if (token) {
+  if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
@@ -77,6 +79,12 @@ export type CreateAttemptPayload = {
   unit?: string;
 };
 
+export type DailyProgressEventPayload = {
+  event_type: DailyProgressEventType;
+  attempt_id?: string;
+  topic?: string;
+};
+
 export function signup(payload: SignupPayload) {
   return request<AuthResponse>("/api/auth/signup", {
     method: "POST",
@@ -93,6 +101,19 @@ export function login(payload: LoginPayload) {
 
 export function getMe() {
   return request<AuthUser>("/api/auth/me");
+}
+
+export function getMeWithToken(accessToken: string) {
+  return request<AuthUser>("/api/auth/me", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+}
+
+export function getGoogleAuthStartUrl(returnTo: string) {
+  const params = new URLSearchParams({ return_to: returnTo });
+  return `${API_URL}/api/auth/google/start?${params.toString()}`;
 }
 
 export function listProblems() {
@@ -123,4 +144,15 @@ export function getIntervention(attemptId: string) {
 
 export function getSummary(attemptId: string) {
   return request<Summary>(`/api/attempts/${attemptId}/summary`);
+}
+
+export function getDailyProgress() {
+  return request<DailyProgress>("/api/progress/daily");
+}
+
+export function postDailyProgressEvent(payload: DailyProgressEventPayload) {
+  return request<DailyProgress>("/api/progress/daily/events", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }

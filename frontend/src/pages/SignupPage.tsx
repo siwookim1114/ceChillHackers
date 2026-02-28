@@ -2,13 +2,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { signup } from "../api";
 import { getAccessToken, saveAuthSession } from "../auth";
-import type { LearningPace, LearningStyle, UserRole } from "../types";
-
-const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
-  { value: "student", label: "Student" },
-  { value: "teacher", label: "Teacher" },
-  { value: "parent", label: "Parent" }
-];
+import { EyeToggleIcon } from "../components/EyeToggleIcon";
+import type { LearningPace, LearningStyle } from "../types";
 
 const STYLE_OPTIONS: Array<{ value: LearningStyle; label: string }> = [
   { value: "question", label: "Question-first" },
@@ -28,10 +23,11 @@ export function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("student");
   const [learningStyle, setLearningStyle] = useState<LearningStyle>("question");
   const [learningPace, setLearningPace] = useState<LearningPace>("normal");
   const [targetGoal, setTargetGoal] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +37,6 @@ export function SignupPage() {
     }
   }, [navigate]);
 
-  const disableStudentFields = role !== "student";
   const canSubmit = useMemo(
     () => Boolean(email.trim() && password && confirmPassword && !submitting),
     [confirmPassword, email, password, submitting]
@@ -66,7 +61,7 @@ export function SignupPage() {
         email: email.trim(),
         password,
         display_name: displayName.trim(),
-        role,
+        role: "student",
         learning_style: learningStyle,
         learning_pace: learningPace,
         target_goal: targetGoal.trim() || undefined
@@ -81,16 +76,40 @@ export function SignupPage() {
   };
 
   return (
-    <main className="page page-auth">
-      <section className="card auth-card auth-card-wide">
-        <div className="auth-header">
-          <p className="overline">Get Started</p>
-          <h2>Create Account</h2>
-          <p className="muted">Set your profile once and use adaptive coaching across sessions.</p>
-        </div>
+    <main className="auth-plain-root">
+      <header className="auth-plain-topbar">
+        <div className="auth-plain-container">
+          <button className="entry-brand" onClick={() => navigate("/")} type="button">
+            <span className="entry-brand-mark">TC</span>
+            <strong>TutorCoach</strong>
+          </button>
 
-        <form className="auth-form" onSubmit={onSubmit}>
-          <div className="auth-grid-two">
+          <nav className="entry-nav-links">
+            <a href="/practice">Practice</a>
+            <a href="/practice#create-course">Create Course</a>
+            <a href="/progress">Session Results</a>
+            <a href="/home">AI Coach</a>
+          </nav>
+
+          <div className="entry-top-actions">
+            <button className="btn-entry-ghost" type="button">
+              English, USD
+            </button>
+            <button className="btn-entry-outline" onClick={() => navigate("/login")} type="button">
+              Log In
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <section className="auth-plain-body">
+        <div className="auth-plain-panel auth-signup-panel">
+          <h1>Create account</h1>
+          <p className="auth-plain-signup-links">
+            Already have an account? <Link to="/login">Log in</Link>
+          </p>
+
+          <form className="auth-plain-form" onSubmit={onSubmit}>
             <label>
               Display Name
               <input
@@ -101,113 +120,120 @@ export function SignupPage() {
                 value={displayName}
               />
             </label>
-            <label>
-              Role
-              <select onChange={(event) => setRole(event.target.value as UserRole)} value={role}>
-                {ROLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
 
-          <label>
-            Email
-            <input
-              autoComplete="email"
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              required
-              type="email"
-              value={email}
-            />
-          </label>
-
-          <div className="auth-grid-two">
             <label>
-              Password
+              Email
               <input
-                autoComplete="new-password"
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="At least 8 characters"
+                autoComplete="email"
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
                 required
-                type="password"
-                value={password}
+                type="email"
+                value={email}
               />
             </label>
+
+            <div className="auth-grid-two">
+              <label>
+                Password
+                <div className="auth-password-row">
+                  <input
+                    autoComplete="new-password"
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="At least 8 characters"
+                    required
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                  />
+                  <button
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="auth-password-toggle"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    type="button"
+                  >
+                    <EyeToggleIcon visible={showPassword} />
+                  </button>
+                </div>
+              </label>
+              <label>
+                Confirm Password
+                <div className="auth-password-row">
+                  <input
+                    autoComplete="new-password"
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Re-enter password"
+                    required
+                    type={showConfirmPassword ? "text" : "password"}
+                    value={confirmPassword}
+                  />
+                  <button
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                    className="auth-password-toggle"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    type="button"
+                  >
+                    <EyeToggleIcon visible={showConfirmPassword} />
+                  </button>
+                </div>
+              </label>
+            </div>
+
+            <div className="auth-grid-two">
+              <label>
+                Learning Style
+                <select
+                  onChange={(event) => setLearningStyle(event.target.value as LearningStyle)}
+                  value={learningStyle}
+                >
+                  {STYLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Learning Pace
+                <select
+                  onChange={(event) => setLearningPace(event.target.value as LearningPace)}
+                  value={learningPace}
+                >
+                  {PACE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
             <label>
-              Confirm Password
+              Target Goal (optional)
               <input
-                autoComplete="new-password"
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                placeholder="Re-enter password"
-                required
-                type="password"
-                value={confirmPassword}
+                onChange={(event) => setTargetGoal(event.target.value)}
+                placeholder="Example: AP Calculus exam in May"
+                type="text"
+                value={targetGoal}
               />
             </label>
-          </div>
 
-          <div className="auth-grid-two">
-            <label>
-              Learning Style
-              <select
-                disabled={disableStudentFields}
-                onChange={(event) => setLearningStyle(event.target.value as LearningStyle)}
-                value={learningStyle}
-              >
-                {STYLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Learning Pace
-              <select
-                disabled={disableStudentFields}
-                onChange={(event) => setLearningPace(event.target.value as LearningPace)}
-                value={learningPace}
-              >
-                {PACE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <label>
-            Target Goal (optional)
-            <input
-              onChange={(event) => setTargetGoal(event.target.value)}
-              placeholder="Example: IB Math AA exam in May"
-              type="text"
-              value={targetGoal}
-            />
-          </label>
-
-          {disableStudentFields && (
             <p className="muted auth-note">
-              Learning style and pace are primarily used for student accounts.
+              Account type: learner. You can change learning preferences anytime.
             </p>
-          )}
 
-          {error && <p className="error">{error}</p>}
+            {error && <p className="error">{error}</p>}
 
-          <button className="btn-primary auth-submit" disabled={!canSubmit} type="submit">
-            {submitting ? "Creating account..." : "Create Account"}
-          </button>
-        </form>
+            <button className="auth-submit-plain" disabled={!canSubmit} type="submit">
+              {submitting ? "Creating account..." : "Create account"}
+            </button>
+          </form>
 
-        <p className="auth-footnote">
-          Already have an account? <Link to="/login">Log in</Link>
-        </p>
+          <p className="auth-plain-terms">
+            By creating an account, you agree to TutorCoach <Link to="/signup">Terms</Link> and{" "}
+            <Link to="/signup">Privacy Policy</Link>.
+          </p>
+        </div>
       </section>
     </main>
   );
