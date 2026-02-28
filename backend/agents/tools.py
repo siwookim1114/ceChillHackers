@@ -6,7 +6,14 @@ This module intentionally avoids persistence and raw-content logging.
 from __future__ import annotations
 
 from typing import Any
+import json
+import uuid
+import base64
+import boto3
+from typing import Any, Union
 
+from langchain_core.tools import BaseTool
+from langchain_aws import AmazonKnowledgeBasesRetriever
 from backend.agents.schemas.professor import (
     Citation,
     ProfessorMode,
@@ -114,3 +121,271 @@ def get_professor_json_schemas() -> dict[str, dict[str, Any]]:
         "ProfessorTurnRequest": ProfessorTurnRequest.model_json_schema(),
         "ProfessorTurnResponse": ProfessorTurnResponse.model_json_schema(),
     }
+
+
+# Rag Tools
+class RetrieveContextTool(BaseTool):
+    """
+    Retrieve relevant chunks from Bedrock Knowledge Base.
+    Returns summarized context with source citations.
+    Never returns raw full documents.
+    """
+
+    name: str = "retrieve_context"
+    description: str = (
+        "Retrieve relevant study material chunks for a given query. "
+        "Returns summarized context with citations (doc name + page). "
+        "Use this tool when you need content from uploaded study materials. "
+        "Never returns raw full documents — excerpts and summaries only."
+    )
+
+    kb_id: Any = None
+    region: Any = None
+    top_k: Any = None
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def __init__(self, config, **kwargs):
+        super().__init__(**kwargs)
+        self.kb_id  = config.bedrock.knowledge_base_id
+        self.region = config.aws.region
+        self.top_k  = config.rag.top_k
+
+    def _parse_tool_input(self, tool_input: Union[str, dict]) -> dict:
+        if isinstance(tool_input, str):
+            return json.loads(tool_input)
+        return tool_input
+
+    def _run(self, tool_input: Union[str, dict]) -> str:
+        params = self._parse_tool_input(tool_input)
+        query = params.get("query", "")
+        subject = params.get("subject", "")
+        top_k = params.get("top_k", self.top_k)
+
+        retriever = AmazonKnowledgeBasesRetriever(
+            knowledge_base_id=self.kb_id,
+            region_name=self.region,
+            retrieval_config={
+                "vectorSearchConfiguration": {
+                    "numberOfResults": top_k,
+                    **(
+                        {"filter": {"equals": {"key": "subject", "value": subject}}}
+                        if subject else {}
+                    )
+                }
+            }
+        )
+
+        docs = retriever.invoke(query)
+        if not docs:
+            return json.dumps({"context": "", "citations": [], "found": False})
+        
+        context_parts, citations = [], []
+        for i, doc in enumerate(docs):
+            metadata = doc.metadata or {}
+            source = metadata.get("source", "unknown")
+            page = metadata.get("page_number", "?")
+            doc_name = source.split("/")[-1]
+
+            context_parts.append(f"[{i+1}] {doc.page_content.strip()}")
+            citations.append({"index": i + 1, "doc": doc_name, "page": page})
+
+        return json.dumps({
+            "context": "\n\n".join(context_parts),
+            "citations": citations,
+            "found": True
+        })
+
+
+class UploadDocumentTool(BaseTool):
+    """
+    Upload a PDF to S3 and trigger Bedrock Knowledge Base sync.
+    File bytes processed in memory and discarded after upload.
+    Raw file stored encrypted in S3. Vectors only in Knowledge Base. 
+    """
+
+    name: str = "upload_document"
+    description: str = (
+        "Upload a PDF or slide document to S3 then sync into Knowledge Base. "
+        "Returns doc_id and ingestion_job_id for sync tracking. "
+        "permissions: 'student' | 'teacher' | 'admin'"
+    )
+
+    bucket: Any = None
+    kb_id: Any = None
+    ds_id: Any = None
+    region: Any = None
+    s3: Any = None
+    bedrock: Any = None
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def __init__(self, config, **kwargs):
+        super().__init__(**kwargs)
+        self.bucket  = config.aws.s3_bucket
+        self.kb_id   = config.bedrock.knowledge_base_id
+        self.ds_id   = config.bedrock.data_source_id
+        self.region  = config.aws.region
+        self.s3      = boto3.client("s3", region_name=self.region)
+        self.bedrock = boto3.client("bedrock-agent", region_name=self.region)
+
+    def _parse_tool_input(self, tool_input: Union[str, dict]) -> dict:
+        if isinstance(tool_input, str):
+            return json.loads(tool_input)
+        return tool_input
+
+    def _run(self, tool_input: Union[str, dict]) -> str:
+        params = self._parse_tool_input(tool_input)
+        file_bytes = base64.b64decode(params["file_bytes_b64"])
+        filename = params["filename"]
+        subject = params["subject"]
+        uploader_id = params["uploader_id"]
+        permissions = params.get("permissions", "student")
+
+        try:
+            doc_id = str(uuid.uuid4())
+            s3_key = f"docs/{subject}/{doc_id}/{filename}"
+
+            self.s3.put_object(
+                Bucket=self.bucket,
+                Key=s3_key,
+                Body=file_bytes,
+                ServerSideEncryption="AES256",
+                Metadata={
+                    "subject":     subject,
+                    "uploader_id": uploader_id,
+                    "permissions": permissions,
+                    "doc_id":      doc_id,
+                }
+            )
+
+            sync   = self.bedrock.start_ingestion_job(
+                knowledgeBaseId=self.kb_id,
+                dataSourceId=self.ds_id,
+            )
+            job_id = sync["ingestionJob"]["ingestionJobId"]
+
+            return json.dumps({
+                "doc_id":           doc_id,
+                "s3_key":           s3_key,
+                "ingestion_job_id": job_id,
+                "status":           "syncing"
+            })
+
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    async def _arun(self, *args, **kwargs):
+        raise NotImplementedError("Async not supported")
+
+
+  class CheckIngestionStatusTool(BaseTool):
+      """Check if a document has finished syncing into the Knowledge Base."""
+
+      name:        str = "check_ingestion_status"
+      description: str = (
+          "Check sync status of an uploaded document. "
+          "Returns: STARTING | IN_PROGRESS | COMPLETE | FAILED "
+          "Use after upload_document to confirm the doc is ready for retrieval."
+      )
+
+      kb_id:   Any = None
+      ds_id:   Any = None
+      bedrock: Any = None
+
+      class Config:
+          arbitrary_types_allowed = True
+
+      def __init__(self, config, **kwargs):
+          super().__init__(**kwargs)
+          self.kb_id   = config.bedrock.knowledge_base_id
+          self.ds_id   = config.bedrock.data_source_id
+          self.bedrock = boto3.client("bedrock-agent", region_name=config.aws.region)
+
+      def _parse_tool_input(self, tool_input: Union[str, dict]) -> dict:
+          if isinstance(tool_input, str):
+              return json.loads(tool_input)
+          return tool_input
+
+      def _run(self, tool_input: Union[str, dict]) -> str:
+          params           = self._parse_tool_input(tool_input)
+          ingestion_job_id = params.get("ingestion_job_id", "")
+
+          try:
+              res   = self.bedrock.get_ingestion_job(
+                  knowledgeBaseId=self.kb_id,
+                  dataSourceId=self.ds_id,
+                  ingestionJobId=ingestion_job_id
+              )
+              job   = res["ingestionJob"]
+              stats = job.get("statistics", {})
+
+              return json.dumps({
+                  "status":        job["status"],
+                  "indexed_count": stats.get("numberOfDocumentsIndexed", 0),
+                  "failed_count":  stats.get("numberOfDocumentsFailed", 0),
+              })
+
+          except Exception as e:
+              return json.dumps({"error": str(e)})
+
+      async def _arun(self, *args, **kwargs):
+          raise NotImplementedError("Async not supported")
+
+
+  class ListDocumentsTool(BaseTool):
+      """List documents in the Knowledge Base — metadata only, no raw content."""
+
+      name:        str = "list_available_documents"
+      description: str = (
+          "List all documents available in the Knowledge Base. "
+          "Returns filename, subject, size, last modified. "
+          "Never returns raw document content — metadata only."
+      )
+
+      bucket: Any = None
+      s3:     Any = None
+
+      class Config:
+          arbitrary_types_allowed = True
+
+      def __init__(self, config, **kwargs):
+          super().__init__(**kwargs)
+          self.bucket = config.aws.s3_bucket
+          self.s3     = boto3.client("s3", region_name=config.aws.region)
+
+      def _parse_tool_input(self, tool_input: Union[str, dict]) -> dict:
+          if isinstance(tool_input, str):
+              return json.loads(tool_input)
+          return tool_input
+
+      def _run(self, tool_input: Union[str, dict]) -> str:
+          params  = self._parse_tool_input(tool_input)
+          subject = params.get("subject", "")
+
+          try:
+              prefix   = f"docs/{subject}/" if subject else "docs/"
+              response = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
+
+              docs = [
+                  {
+                      "filename":      obj["Key"].split("/")[-1],
+                      "s3_key":        obj["Key"],
+                      "last_modified": obj["LastModified"].isoformat(),
+                      "size_kb":       round(obj["Size"] / 1024, 1),
+                  }
+                  for obj in response.get("Contents", [])
+                  if not obj["Key"].endswith("/")   # skip folder entries
+              ]
+
+              return json.dumps({"documents": docs, "total": len(docs)})
+
+          except Exception as e:
+              return json.dumps({"error": str(e)})
+
+      async def _arun(self, *args, **kwargs):
+          raise NotImplementedError("Async not supported")
+
+
