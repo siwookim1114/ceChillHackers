@@ -12,10 +12,6 @@ _ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_ROOT / ".env")
 
 
-
-_MISSING = object()
-
-
 class Config:
     """Configuration manager with dot-notation access.
 
@@ -29,9 +25,8 @@ class Config:
 
     def _parse_nested(self, d: Dict[str, Any]) -> None:
         for key, value in d.items():
-            full_key = self._join_prefix(prefix, key)
             if isinstance(value, dict):
-                setattr(self, key, Config(value, prefix=full_key))
+                setattr(self, key, Config(value))
             else:
                 env_key = key.upper()
                 setattr(self, key, os.getenv(env_key, value))
@@ -47,6 +42,7 @@ class Config:
             if value is None:
                 return default
         return value
+
     def to_dict(self) -> Dict[str, Any]:
         return self.config
 

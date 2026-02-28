@@ -63,9 +63,44 @@ class ProfessorTurnResponse(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Professor Agent API-layer models
+# ---------------------------------------------------------------------------
+
+class ProfessorChatResponse(BaseModel):
+    """API-layer response for text-based professor chat."""
+    model_config = ConfigDict(extra="forbid")
+
+    assistant_response: str = Field(min_length=1)
+    strategy: ProfessorTurnStrategy
+    revealed_final_answer: Literal[False] = False
+    next_action: ProfessorNextAction = ProfessorNextAction.CONTINUE
+    citations: list[Citation] = Field(default_factory=list)
+    rag_found: bool = False
+    rag_mode: str = ""
+
+
+class ProfessorVoiceResponse(BaseModel):
+    """API-layer response for voice professor turn."""
+    model_config = ConfigDict(extra="forbid")
+
+    transcript: str = Field(min_length=1)
+    assistant_response: str = Field(min_length=1)
+    strategy: ProfessorTurnStrategy
+    next_action: ProfessorNextAction = ProfessorNextAction.CONTINUE
+    citations: list[Citation] = Field(default_factory=list)
+    audio_base64: str = Field(min_length=1)
+
+
 class KnowledgeMode(str, Enum):
     INTERNAL_ONLY = "internal_only"
     MIXED = "mixed"
+    EXTERNAL_ONLY = "external_only"
+
+
+class RagMode(str, Enum):
+    INTERNAL_ONLY = "internal_only"
+    EXTERNAL_OK = "external_ok"
     EXTERNAL_ONLY = "external_only"
 
 

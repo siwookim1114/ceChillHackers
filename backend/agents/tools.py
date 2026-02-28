@@ -1,16 +1,18 @@
 """Agent tools for the AI tutoring platform.
 
-Provides the three BaseTool classes used by RagAgent for knowledge-base
-retrieval and document management.  These tools are shared across all
-calling agents (Professor, TA, Manager) -- no agent-specific logic here.
+Provides BaseTool classes used by agents for knowledge-base retrieval,
+document management, and web search.  Shared across all calling agents
+(Professor, TA, Manager) -- no agent-specific logic here.
 
 Document uploads are handled directly by the FastAPI layer (not the agent).
 
 Tools
 -----
+ProfessorRespondTool     - Professor tutoring with Socratic dialogue
 RetrieveContextTool      - Semantic search via local FAISS (S3 -> PDF -> embeddings)
 CheckIngestionStatusTool - Poll ingestion job progress
 ListDocumentsTool        - List available documents (metadata only)
+ExaWebSearchTool         - Web search via Exa API for EXTERNAL_OK / EXTERNAL_ONLY modes
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Union
 

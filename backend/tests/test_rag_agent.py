@@ -6,7 +6,6 @@ Run from the backend/ directory:
     pytest tests/test_rag_agent.py -v -s
 """
 import json
-from pathlib import Path
 
 import pytest
 
@@ -196,7 +195,7 @@ def test_external_ok_uses_web_search(agent):
     web citations are present with source_type='web'.
     """
     result = agent.run({
-        "prompt": "What is the Pythagorean theorem and how is it proven?",
+        "prompt": "Explain the mechanisms of CRISPR-Cas9 gene editing and its applications in medicine.",
         "caller": "professor",
         "mode": "external_ok",
         "level": "intermediate",
