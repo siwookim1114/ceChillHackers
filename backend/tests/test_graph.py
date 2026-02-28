@@ -32,6 +32,7 @@ from agents.graph_state import (
 from agents.nodes import (
     _classify_intent,
     _infer_difficulty_curve,
+    classify_hitl_feedback,
     manager_node,
     respond_node,
 )
@@ -856,3 +857,130 @@ class TestHITLRouteHistoryReset:
             route_history=result["route_history"],
         )
         assert route_from_manager(state2) == "professor"  # should NOT bail to respond
+
+
+# ===================================================================
+# Block 10: "Solve problems" routing fix
+# ===================================================================
+
+class TestSolveProblemsRouting:
+    """Test that 'solve problems' queries route to ta_problem_gen, not professor."""
+
+    @pytest.mark.parametrize("query,expected_route", [
+        ("I want to solve some probability problems", "ta_problem_gen"),
+        ("I want to solve problems", "ta_problem_gen"),
+        ("solve some math problems", "ta_problem_gen"),
+        ("let's solve some exercises", "ta_problem_gen"),
+        ("I'd like to try some practice questions", "ta_problem_gen"),
+        ("I need to work on some problems", "ta_problem_gen"),
+        ("do some calculus problems", "ta_problem_gen"),
+        ("try some linear algebra exercises", "ta_problem_gen"),
+        ("tackle some probability questions", "ta_problem_gen"),
+        ("I want to practice linear algebra", "ta_problem_gen"),
+        ("let's do some problems", "ta_problem_gen"),
+    ])
+    def test_solve_problems_routes_to_gen(self, query, expected_route):
+        result = _classify_intent(query, {})
+        assert result["route"] == expected_route, (
+            f"'{query}' expected {expected_route}, got {result['route']} "
+            f"(intent={result['intent']})"
+        )
+
+    def test_check_my_solution_still_routes_to_solve(self):
+        """Grading queries must still route to ta_problem_solve."""
+        result = _classify_intent("Check my solution for problem 3", {})
+        assert result["route"] == "ta_problem_solve"
+
+    def test_explain_concept_still_routes_to_professor(self):
+        """Pure concept queries must still route to professor."""
+        result = _classify_intent("Explain what eigenvalues are", {})
+        assert result["route"] == "professor"
+
+
+# ===================================================================
+# Block 11: HITL Feedback Classifier (voice-driven)
+# ===================================================================
+
+class TestHITLFeedbackClassifier:
+    """Test classify_hitl_feedback for voice-driven HITL."""
+
+    # --- Approve signals ---
+    @pytest.mark.parametrize("text", [
+        "yes",
+        "Yeah",
+        "ok",
+        "looks good",
+        "that's great",
+        "perfect",
+        "thanks",
+        "sounds good",
+        "I like this",
+        "great, thank you",
+        "LGTM",
+        "continue",
+        "go ahead",
+    ])
+    def test_approve_signals(self, text):
+        result = classify_hitl_feedback(text, "professor")
+        assert result["action"] == "approve", (
+            f"'{text}' should be classified as approve, got {result['action']}"
+        )
+
+    # --- Revise signals ---
+    @pytest.mark.parametrize("text", [
+        "no, that's wrong",
+        "I don't understand",
+        "explain it differently",
+        "too complicated",
+        "more detail please",
+        "can you elaborate",
+        "unclear",
+        "try again",
+        "too short",
+        "confused",
+    ])
+    def test_revise_signals(self, text):
+        result = classify_hitl_feedback(text, "professor")
+        assert result["action"] == "revise", (
+            f"'{text}' should be classified as revise, got {result['action']}"
+        )
+
+    # --- Reroute signals ---
+    def test_reroute_to_problem_gen(self):
+        """When current agent is professor, asking for problems should reroute."""
+        result = classify_hitl_feedback(
+            "give me practice problems instead", "professor"
+        )
+        assert result["action"] == "reroute"
+        assert result["reroute_to"] == "ta_problem_gen"
+
+    def test_reroute_to_professor(self):
+        """When current agent is ta_problem_gen, asking for explanation should reroute."""
+        result = classify_hitl_feedback(
+            "actually explain this concept to me", "ta_problem_gen"
+        )
+        assert result["action"] == "reroute"
+        assert result["reroute_to"] == "professor"
+
+    def test_no_reroute_to_same_agent(self):
+        """If feedback maps to the same agent, it should be revise, not reroute."""
+        result = classify_hitl_feedback(
+            "explain it more simply", "professor"
+        )
+        # "explain" matches professor, but current_agent IS professor → no reroute
+        assert result["action"] != "reroute"
+
+    def test_empty_feedback_is_approve(self):
+        result = classify_hitl_feedback("", "professor")
+        assert result["action"] == "approve"
+
+    def test_ambiguous_feedback_defaults_to_revise(self):
+        """Ambiguous/unclear feedback should default to revise."""
+        result = classify_hitl_feedback(
+            "hmm I was thinking about something else entirely", "professor"
+        )
+        assert result["action"] == "revise"
+
+    def test_feedback_preserves_text(self):
+        result = classify_hitl_feedback("explain differently", "professor")
+        assert result["feedback_text"] == "explain differently"

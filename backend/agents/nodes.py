@@ -56,6 +56,21 @@ _PROBLEM_GEN_PATTERNS = [
     re.compile(r"\b(i\s+want|i\s+need)\s+(to\s+)?practice\b", re.I),
     re.compile(r"\bexercises?\s+(on|for|about)\b", re.I),
     re.compile(r"\bmore\s+exercises?\b", re.I),
+    # "solve / work on / do / try [some] [topic] problems"
+    re.compile(
+        r"\b(solve|work\s+on|do|try|attempt|tackle)\s+"
+        r"(?:some|a\s+few|a\s+couple\s+(?:of\s+)?)?"
+        r"(?:\w+\s+){0,3}(problem|exercise|question)s\b",
+        re.I,
+    ),
+    # "I want to solve / work on / practice [some] [topic] problems"
+    re.compile(
+        r"\b(i\s+want|i\s+need|i'?d\s+like|let'?s?)\s+(?:to\s+)?"
+        r"(solve|work\s+on|do|try|practice)\s+"
+        r"(?:some|a\s+few|a\s+couple\s+(?:of\s+)?)?"
+        r"(?:\w+\s+){0,3}(problem|exercise|question)s?\b",
+        re.I,
+    ),
     # Difficulty escalation / de-escalation → still goes to problem_gen
     re.compile(r"\b(easier|simpler|easy|beginner)\s+(problem|question|exercise)s?\b", re.I),
     re.compile(r"\b(harder|tougher|difficult|challenging|advanced)\s+(problem|question|exercise)s?\b", re.I),
@@ -974,3 +989,115 @@ def human_feedback_node(state: OrchestratorState) -> dict:
         ),
         "awaiting_feedback": False,
     }
+
+
+# ---------------------------------------------------------------------------
+# HITL Feedback Classifier (voice-driven)
+# ---------------------------------------------------------------------------
+
+# Approve patterns -- short affirmatives, explicit acceptance
+_FEEDBACK_APPROVE_PATTERNS = [
+    re.compile(r"^(yes|yeah|yep|yup|sure|ok|okay|fine|alright|right)[\s.!,]*$", re.I),
+    re.compile(r"\b(approve|accept|lgtm|ship\s+it)\b", re.I),
+    re.compile(
+        r"\b(looks?\s+good|sounds?\s+good|that'?s?\s+"
+        r"(good|great|fine|correct|right|perfect|enough))\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(good|great|perfect|nice|wonderful|excellent|fantastic|awesome|amazing)\b"
+        r".*\b(thanks?|thank\s+you|job|work|response|answer)\b",
+        re.I,
+    ),
+    re.compile(
+        r"^(good|great|perfect|nice|thanks?|thank\s+you|continue|next|"
+        r"move\s+on|go\s+ahead|proceed)[\s.!,]*$",
+        re.I,
+    ),
+    re.compile(
+        r"\b(i\s+(like|love|agree\s+with)|this\s+is\s+"
+        r"(good|great|correct|right|helpful))\b",
+        re.I,
+    ),
+]
+
+# Revise patterns -- criticism, confusion, requests for changes
+_FEEDBACK_REVISE_PATTERNS = [
+    re.compile(r"\b(no|nah|nope|not\s+(right|correct|good|great|what|quite))\b", re.I),
+    re.compile(r"\b(wrong|incorrect|bad|terrible|useless|unhelpful)\b", re.I),
+    re.compile(r"\b(revise|redo|retry|try\s+again|again|repeat|rewrite)\b", re.I),
+    re.compile(
+        r"\b(explain|elaborate|clarify|rephrase|reword|simplify)\s+"
+        r"(it\s+)?(again|differently|better|more|further|simply|clearly)?\b",
+        re.I,
+    ),
+    re.compile(r"\bi\s+don'?t\s+(understand|get\s+it|see|follow)\b", re.I),
+    re.compile(r"\b(confused|unclear|vague|ambiguous)\b", re.I),
+    re.compile(r"\btoo\s+(short|brief|long|complex|complicated|simple|basic|advanced)\b", re.I),
+    re.compile(r"\b(more|less)\s+(detail|depth|examples?|explanation|context|info)\b", re.I),
+    re.compile(
+        r"\b(can|could|would)\s+you\s+(please\s+)?"
+        r"(explain|elaborate|clarify|simplify|expand|shorten)\b",
+        re.I,
+    ),
+    re.compile(r"\b(what\s+about|how\s+about|but\s+what|and\s+what)\b", re.I),
+]
+
+
+def classify_hitl_feedback(
+    feedback_text: str,
+    current_agent: str = "",
+) -> dict:
+    """Parse spoken/typed user feedback to determine HITL action automatically.
+
+    The Manager agent uses this to interpret voice or text feedback during
+    Human-in-the-Loop review, eliminating the need for manual button clicks.
+
+    Classification priority:
+    1. Approve patterns -- clear acceptance signals → approve
+    2. Reroute detection -- if text matches a different agent's intent → reroute
+    3. Revise patterns -- criticism or change requests → revise
+    4. Default -- treat ambiguous input as revision with feedback context
+
+    Args:
+        feedback_text: The user's spoken/typed feedback (STT transcript or text).
+        current_agent: The agent that produced the response being reviewed.
+
+    Returns:
+        dict with keys: action (approve|revise|reroute), feedback_text, reroute_to
+    """
+    text = feedback_text.strip()
+    if not text:
+        return {"action": "approve", "feedback_text": "", "reroute_to": None}
+
+    # --- 1. Approve patterns (short affirmatives) ---
+    for pat in _FEEDBACK_APPROVE_PATTERNS:
+        if pat.search(text):
+            return {"action": "approve", "feedback_text": text, "reroute_to": None}
+
+    # --- 2. Reroute detection via intent classification ---
+    # If the feedback looks like a new query for a DIFFERENT agent, reroute.
+    routing = _classify_intent(text, {})
+    inferred_agent = routing.get("route", "")
+    # Only reroute if: different agent, not a stub, reasonable confidence
+    if (
+        inferred_agent
+        and inferred_agent != current_agent
+        and inferred_agent not in ("respond", "planner", "profile")
+        and routing.get("confidence", 0) >= 0.7
+    ):
+        return {
+            "action": "reroute",
+            "feedback_text": text,
+            "reroute_to": inferred_agent,
+        }
+
+    # --- 3. Revise patterns (criticism, confusion, change requests) ---
+    for pat in _FEEDBACK_REVISE_PATTERNS:
+        if pat.search(text):
+            return {"action": "revise", "feedback_text": text, "reroute_to": None}
+
+    # --- 4. Default: treat unrecognized feedback as revision request ---
+    # The user said something that isn't clearly approve/revise/reroute;
+    # safest to treat it as additional context for the agent to consider.
+    return {"action": "revise", "feedback_text": text, "reroute_to": None}
