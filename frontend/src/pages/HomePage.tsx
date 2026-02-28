@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createAttempt, listProblems } from "../api";
+import { createAttempt, getMe, listProblems } from "../api";
+import { clearAuthSession, getAccessToken, getAuthUser, saveAuthSession } from "../auth";
 import { AppShell } from "../components/AppShell";
-import type { Problem } from "../types";
+import type { AuthUser, Problem } from "../types";
 
 const TOPIC_SUGGESTIONS = [
   "Differentiation Basics",
@@ -14,8 +15,10 @@ const TOPIC_SUGGESTIONS = [
 
 export function HomePage() {
   const navigate = useNavigate();
+  const [user, setUser] = useState<AuthUser | null>(() => getAuthUser());
   const [problems, setProblems] = useState<Problem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [creatingCourse, setCreatingCourse] = useState(false);
@@ -25,7 +28,24 @@ export function HomePage() {
 
   const level = localStorage.getItem("preferred_level") ?? "Beginner";
   const style = localStorage.getItem("preferred_style") ?? "Socratic";
-  const guestId = localStorage.getItem("guest_id") ?? "guest_unknown";
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      setAuthLoading(false);
+      return;
+    }
+
+    getMe()
+      .then((me) => {
+        saveAuthSession(token, me);
+        setUser(me);
+      })
+      .catch(() => {
+        clearAuthSession();
+        navigate("/login", { replace: true });
+      })
+      .finally(() => setAuthLoading(false));
+  }, [navigate]);
 
   useEffect(() => {
     listProblems()
@@ -34,11 +54,24 @@ export function HomePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const getActorId = () => {
+    if (user) {
+      return `user_${user.id}`;
+    }
+    const existing = localStorage.getItem("guest_id");
+    if (existing) {
+      return existing;
+    }
+    const next = `guest_${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem("guest_id", next);
+    return next;
+  };
+
   const startPractice = async (problemId: string) => {
     setLaunchingId(problemId);
     setError(null);
     try {
-      const attempt = await createAttempt({ guest_id: guestId, problem_id: problemId });
+      const attempt = await createAttempt({ guest_id: getActorId(), problem_id: problemId });
       navigate(`/solve/${attempt.attempt_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start attempt");
@@ -61,7 +94,7 @@ export function HomePage() {
     setError(null);
     try {
       const attempt = await createAttempt({
-        guest_id: guestId,
+        guest_id: getActorId(),
         problem_text: coursePrompt.trim(),
         answer_key: courseAnswer.trim(),
         unit: courseTopic.trim() || "Custom Course"
@@ -79,10 +112,27 @@ export function HomePage() {
     setCoursePrompt(`Teach me ${topic}. Give me one guided practice problem.`);
   };
 
+  if (authLoading) {
+    return (
+      <AppShell title="Learning Hub" subtitle="Checking your session...">
+        <section className="panel-card">
+          <div className="loading-state compact">
+            <div className="spinner" />
+            <span>Verifying session…</span>
+          </div>
+        </section>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell
       title="Learning Hub"
-      subtitle="Start quick practice or create a brand-new course from your own topic."
+      subtitle={
+        user
+          ? `Welcome back, ${user.display_name}. Start quick practice or create a new course.`
+          : "Start quick practice or create a brand-new course from your own topic."
+      }
     >
       <div className="home-dashboard">
         <section className="promo-banner">

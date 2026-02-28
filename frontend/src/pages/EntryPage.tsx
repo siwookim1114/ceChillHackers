@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { getAccessToken } from "../auth";
 
 function makeGuestId() {
   return `guest_${Math.random().toString(36).slice(2, 10)}`;
@@ -6,6 +8,12 @@ function makeGuestId() {
 
 export function EntryPage() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (getAccessToken()) {
+      navigate("/home");
+    }
+  }, [navigate]);
 
   const startAsGuest = () => {
     const id = localStorage.getItem("guest_id") ?? makeGuestId();
@@ -36,10 +44,18 @@ export function EntryPage() {
         </div>
 
         <div className="hero-cta">
-          <button className="btn-primary" onClick={startAsGuest} type="button">
-            Start as Guest →
-          </button>
-          <span className="hint-text">No account needed · Free forever</span>
+          <div className="hero-actions">
+            <button className="btn-primary" onClick={() => navigate("/signup")} type="button">
+              Create Account
+            </button>
+            <button className="btn-muted" onClick={() => navigate("/login")} type="button">
+              Log In
+            </button>
+            <button className="btn-teal" onClick={startAsGuest} type="button">
+              Start as Guest
+            </button>
+          </div>
+          <span className="hint-text">Create an account to sync learning progress across the team.</span>
         </div>
       </section>
     </main>

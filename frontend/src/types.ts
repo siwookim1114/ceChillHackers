@@ -67,3 +67,23 @@ export type Summary = {
     label: string;
   }>;
 };
+
+export type UserRole = "student" | "teacher" | "parent";
+export type LearningStyle = "explanation" | "question" | "problem_solving";
+export type LearningPace = "fast" | "normal" | "slow";
+
+export type AuthUser = {
+  id: string;
+  email: string;
+  display_name: string;
+  role: UserRole;
+  learning_style: LearningStyle | null;
+  learning_pace: LearningPace | null;
+  target_goal: string | null;
+};
+
+export type AuthResponse = {
+  access_token: string;
+  token_type: "bearer";
+  user: AuthUser;
+};
