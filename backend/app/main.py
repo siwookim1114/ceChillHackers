@@ -6,7 +6,9 @@ import os
 import base64
 import hashlib
 import hmac
+import re
 import secrets
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -18,10 +20,20 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+
+try:
+    import boto3
+    from botocore.config import Config as BotoConfig
+    from botocore.exceptions import BotoCoreError, ClientError
+except ImportError:
+    boto3 = None
+    BotoConfig = None
+    BotoCoreError = Exception
+    ClientError = Exception
 
 try:
     import psycopg
@@ -77,8 +89,58 @@ GOOGLE_REDIRECT_URI = os.getenv(
 ).strip()
 OAUTH_STATE_TTL_SEC = int(os.getenv("OAUTH_STATE_TTL_SEC", "600"))
 GOOGLE_OAUTH_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI)
+S3_LECTURE_UPLOAD_URI = os.getenv(
+    "S3_LECTURE_UPLOAD_URI", "s3://cechillhacker-filebucket/docs/lecture_slides/"
+).strip()
+FEATHERLESS_API_BASE_URL = os.getenv(
+    "FEATHERLESS_API_BASE_URL", "https://api.featherless.ai/v1"
+).strip()
+FEATHERLESS_API_KEY = os.getenv("FEATHERLESS_API_KEY", "").strip()
+FEATHERLESS_MODEL = os.getenv("FEATHERLESS_MODEL", "Qwen/Qwen2.5-3B-Instruct").strip()
+FEATHERLESS_TIMEOUT_SEC = float(os.getenv("FEATHERLESS_TIMEOUT_SEC", "30"))
+FEATHERLESS_HTTP_REFERER = os.getenv("FEATHERLESS_HTTP_REFERER", FRONTEND_URL).strip()
+FEATHERLESS_X_TITLE = os.getenv("FEATHERLESS_X_TITLE", "TutorCoach").strip()
+FEATHERLESS_USER_AGENT = os.getenv(
+    "FEATHERLESS_USER_AGENT", "TutorCoach/1.0 (Codex backend)"
+).strip()
+FEATHERLESS_FORCE_CURL = os.getenv("FEATHERLESS_FORCE_CURL", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+FEATHERLESS_LOCAL_FALLBACK = os.getenv("FEATHERLESS_LOCAL_FALLBACK", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+WHISPER_API_BASE_URL = os.getenv("WHISPER_API_BASE_URL", "https://api.openai.com/v1").strip()
+WHISPER_API_KEY = os.getenv("WHISPER_API_KEY", "").strip()
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "whisper-1").strip()
+WHISPER_TRANSCRIBE_PATH = os.getenv("WHISPER_TRANSCRIBE_PATH", "/audio/transcriptions").strip()
+WHISPER_TIMEOUT_SEC = float(os.getenv("WHISPER_TIMEOUT_SEC", "45"))
+MINIMAX_API_BASE_URL = os.getenv("MINIMAX_API_BASE_URL", "https://api.minimax.io").strip()
+MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "").strip()
+MINIMAX_GROUP_ID = os.getenv("MINIMAX_GROUP_ID", "").strip()
+MINIMAX_TTS_MODEL = os.getenv("MINIMAX_TTS_MODEL", "speech-02-hd").strip()
+MINIMAX_TTS_VOICE_ID = os.getenv("MINIMAX_TTS_VOICE_ID", "male-qn-qingse").strip()
+MINIMAX_TTS_OUTPUT_FORMAT = os.getenv("MINIMAX_TTS_OUTPUT_FORMAT", "hex").strip().lower()
+MINIMAX_TTS_TIMEOUT_SEC = float(os.getenv("MINIMAX_TTS_TIMEOUT_SEC", "30"))
+VOICE_SESSION_TTL_SEC = int(os.getenv("VOICE_SESSION_TTL_SEC", "3600"))
+VOICE_SESSION_MAX_TURNS = int(os.getenv("VOICE_SESSION_MAX_TURNS", "14"))
+AWS_REGION = os.getenv("AWS_REGION", "").strip()
+AWS_S3_FORCE_PATH_STYLE = os.getenv("AWS_S3_FORCE_PATH_STYLE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 DB_READY = False
 _DB_INIT_LOCK = threading.Lock()
+_S3_CLIENT_LOCK = threading.Lock()
+_S3_CLIENT = None
+_VOICE_SESSION_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
@@ -114,6 +176,674 @@ def parse_json_list(value: Any) -> list[dict[str, str]] | None:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     return None
+
+
+@dataclass(frozen=True)
+class S3Location:
+    bucket: str
+    prefix: str
+
+
+def parse_s3_uri(value: str) -> S3Location:
+    raw = value.strip()
+    if not raw:
+        raise ValueError("S3 URI is empty")
+    parts = urlsplit(raw)
+    if parts.scheme != "s3" or not parts.netloc:
+        raise ValueError("S3 URI must use the s3://bucket/prefix format")
+    prefix = parts.path.lstrip("/")
+    if prefix and not prefix.endswith("/"):
+        prefix = f"{prefix}/"
+    return S3Location(bucket=parts.netloc, prefix=prefix)
+
+
+try:
+    LECTURE_S3_LOCATION = parse_s3_uri(S3_LECTURE_UPLOAD_URI)
+except ValueError:
+    LECTURE_S3_LOCATION = None
+
+
+def sanitized_file_name(file_name: str) -> str:
+    base_name = Path(file_name).name.strip() or "uploaded_file"
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._")
+    return cleaned[:180] or "uploaded_file"
+
+
+def get_s3_client() -> Any:
+    global _S3_CLIENT
+    if _S3_CLIENT is not None:
+        return _S3_CLIENT
+    if boto3 is None:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 upload requires boto3. Install backend requirements.",
+        )
+
+    with _S3_CLIENT_LOCK:
+        if _S3_CLIENT is not None:
+            return _S3_CLIENT
+        client_kwargs: dict[str, Any] = {}
+        if AWS_REGION:
+            client_kwargs["region_name"] = AWS_REGION
+        if AWS_S3_FORCE_PATH_STYLE and BotoConfig is not None:
+            client_kwargs["config"] = BotoConfig(s3={"addressing_style": "path"})
+        _S3_CLIENT = boto3.client("s3", **client_kwargs)
+    return _S3_CLIENT
+
+
+def upload_lecture_file_to_s3(
+    user_id: str,
+    course_id: str,
+    lecture_id: str,
+    file_name: str,
+    content_type: Optional[str],
+    file_data: bytes,
+) -> tuple[str, str]:
+    if LECTURE_S3_LOCATION is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "S3 lecture storage is not configured. "
+                "Set S3_LECTURE_UPLOAD_URI to s3://bucket/prefix/."
+            ),
+        )
+
+    safe_name = sanitized_file_name(file_name)
+    timestamp = utcnow().strftime("%Y%m%dT%H%M%SZ")
+    random_suffix = uuid4().hex[:10]
+    key = (
+        f"{LECTURE_S3_LOCATION.prefix}"
+        f"{user_id}/{course_id}/{lecture_id}/{timestamp}_{random_suffix}_{safe_name}"
+    )
+
+    put_object_args: dict[str, Any] = {
+        "Bucket": LECTURE_S3_LOCATION.bucket,
+        "Key": key,
+        "Body": file_data,
+    }
+    if content_type:
+        put_object_args["ContentType"] = content_type
+
+    s3_client = get_s3_client()
+    try:
+        s3_client.put_object(**put_object_args)
+    except (BotoCoreError, ClientError, Exception) as exc:
+        logger.exception("Failed to upload lecture file to S3: key=%s", key)
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to upload lecture file to S3.",
+        ) from exc
+
+    return key, f"s3://{LECTURE_S3_LOCATION.bucket}/{key}"
+
+
+@dataclass
+class VoiceSessionState:
+    session_id: str
+    created_at: datetime
+    updated_at: datetime
+    user_id: Optional[str]
+    attempt_id: Optional[str]
+    course_id: Optional[str]
+    lecture_id: Optional[str]
+    lecture_context: str
+    history: list[dict[str, str]] = field(default_factory=list)
+
+
+VOICE_SESSIONS: Dict[str, VoiceSessionState] = {}
+
+
+def join_api_url(base_url: str, path: str) -> str:
+    cleaned_base = base_url.rstrip("/")
+    cleaned_path = path.strip()
+    if not cleaned_path:
+        return cleaned_base
+    if cleaned_path.startswith("http://") or cleaned_path.startswith("https://"):
+        return cleaned_path
+    if not cleaned_path.startswith("/"):
+        cleaned_path = f"/{cleaned_path}"
+    return f"{cleaned_base}{cleaned_path}"
+
+
+def parse_json_object_from_text(raw: str) -> dict[str, Any]:
+    text = raw.strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def build_multipart_form_data(
+    fields: dict[str, str],
+    file_field_name: str,
+    file_name: str,
+    file_bytes: bytes,
+    file_content_type: str,
+) -> tuple[bytes, str]:
+    boundary = f"----codex-{uuid4().hex}"
+    chunks: list[bytes] = []
+    for key, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"),
+                str(value).encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+
+    chunks.extend(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="{file_field_name}"; '
+                f'filename="{sanitized_file_name(file_name)}"\r\n'
+            ).encode("utf-8"),
+            f"Content-Type: {file_content_type}\r\n\r\n".encode("utf-8"),
+            file_bytes,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    return b"".join(chunks), boundary
+
+
+def call_featherless_chat_via_curl(payload: dict[str, Any], request_url: str) -> dict[str, Any]:
+    command = [
+        "curl",
+        "-sS",
+        "--http1.1",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        str(int(max(15, FEATHERLESS_TIMEOUT_SEC))),
+        "-X",
+        "POST",
+        request_url,
+        "-H",
+        f"Authorization: Bearer {FEATHERLESS_API_KEY}",
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        "Accept: application/json",
+        "-H",
+        f"User-Agent: {FEATHERLESS_USER_AGENT or 'TutorCoach/1.0'}",
+        "-d",
+        json.dumps(payload),
+        "-w",
+        "\n%{http_code}",
+    ]
+    if FEATHERLESS_HTTP_REFERER:
+        command.extend(["-H", f"HTTP-Referer: {FEATHERLESS_HTTP_REFERER}"])
+    if FEATHERLESS_X_TITLE:
+        command.extend(["-H", f"X-Title: {FEATHERLESS_X_TITLE}"])
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Featherless curl fallback failed to execute.",
+        ) from exc
+
+    output = (result.stdout or "").strip()
+    if not output:
+        stderr_text = (result.stderr or "").strip()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Featherless curl fallback returned empty output. {stderr_text}",
+        )
+
+    lines = output.splitlines()
+    status_candidate = lines[-1].strip() if lines else ""
+    response_body = "\n".join(lines[:-1]).strip() if len(lines) > 1 else output
+    try:
+        status_code = int(status_candidate)
+    except ValueError:
+        status_code = 0
+        response_body = output
+
+    if not (200 <= status_code < 300):
+        lowered_body = response_body.lower()
+        if "error code: 1010" in lowered_body or "error code:1010" in lowered_body:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Featherless blocked this request (error code 1010) even with curl fallback. "
+                    "This is usually account/network firewall policy."
+                ),
+            )
+        detail = response_body or (result.stderr or "unknown error")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Featherless curl fallback failed: {detail}",
+        )
+
+    try:
+        parsed = json.loads(response_body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Featherless curl fallback returned non-JSON response.",
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=502,
+            detail="Featherless curl fallback returned invalid JSON.",
+        )
+    return parsed
+
+
+def call_featherless_chat(messages: list[dict[str, str]]) -> str:
+    if not FEATHERLESS_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="FEATHERLESS_API_KEY is not configured.",
+        )
+
+    payload = {
+        "model": FEATHERLESS_MODEL,
+        "messages": messages,
+        "temperature": 0.35,
+        "max_tokens": 480,
+    }
+    request_url = join_api_url(FEATHERLESS_API_BASE_URL, "/chat/completions")
+    if FEATHERLESS_FORCE_CURL:
+        response_json = call_featherless_chat_via_curl(payload, request_url)
+        choices = response_json.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise HTTPException(status_code=502, detail="Featherless returned no choices.")
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str) or not content.strip():
+            raise HTTPException(status_code=502, detail="Featherless returned empty content.")
+        return content.strip()
+
+    headers = {
+        "Authorization": f"Bearer {FEATHERLESS_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": FEATHERLESS_USER_AGENT or "TutorCoach/1.0",
+    }
+    if FEATHERLESS_HTTP_REFERER:
+        headers["HTTP-Referer"] = FEATHERLESS_HTTP_REFERER
+    if FEATHERLESS_X_TITLE:
+        headers["X-Title"] = FEATHERLESS_X_TITLE
+
+    request = urllib_request.Request(
+        request_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=FEATHERLESS_TIMEOUT_SEC) as response:
+            response_json = json.loads(response.read().decode("utf-8"))
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")
+        if "error code: 1010" in body.lower() or "error code:1010" in body.lower():
+            response_json = call_featherless_chat_via_curl(payload, request_url)
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Featherless request failed: {body or exc.reason}",
+            ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Featherless request failed.") from exc
+
+    choices = response_json.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise HTTPException(status_code=502, detail="Featherless returned no choices.")
+    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(status_code=502, detail="Featherless returned empty content.")
+    return content.strip()
+
+
+def transcribe_audio_with_whisper(file_name: str, content_type: Optional[str], file_bytes: bytes) -> str:
+    if not WHISPER_API_KEY:
+        raise HTTPException(status_code=503, detail="WHISPER_API_KEY is not configured.")
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Audio file is empty.")
+
+    mime_type = content_type or "audio/webm"
+    form_body, boundary = build_multipart_form_data(
+        fields={"model": WHISPER_MODEL},
+        file_field_name="file",
+        file_name=file_name or "voice.webm",
+        file_bytes=file_bytes,
+        file_content_type=mime_type,
+    )
+    request_url = join_api_url(WHISPER_API_BASE_URL, WHISPER_TRANSCRIBE_PATH)
+    request = urllib_request.Request(
+        request_url,
+        data=form_body,
+        headers={
+            "Authorization": f"Bearer {WHISPER_API_KEY}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=WHISPER_TIMEOUT_SEC) as response:
+            response_json = json.loads(response.read().decode("utf-8"))
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Whisper transcription failed: {body or exc.reason}",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Whisper transcription failed.") from exc
+
+    transcript = response_json.get("text")
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise HTTPException(status_code=502, detail="Whisper returned empty transcript.")
+    return transcript.strip()
+
+
+def synthesize_tts_with_minimax(text: str) -> tuple[str, str]:
+    if not MINIMAX_API_KEY:
+        raise HTTPException(status_code=503, detail="MINIMAX_API_KEY is not configured.")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="TTS text is empty.")
+
+    request_url = f"{MINIMAX_API_BASE_URL.rstrip('/')}/v1/t2a_v2"
+    if MINIMAX_GROUP_ID:
+        request_url = f"{request_url}?{urlencode({'GroupId': MINIMAX_GROUP_ID})}"
+
+    output_format = MINIMAX_TTS_OUTPUT_FORMAT if MINIMAX_TTS_OUTPUT_FORMAT else "hex"
+    payload = {
+        "model": MINIMAX_TTS_MODEL,
+        "text": text.strip(),
+        "output_format": output_format,
+        "stream": False,
+        "voice_setting": {
+            "voice_id": MINIMAX_TTS_VOICE_ID,
+            "speed": 1.0,
+            "vol": 1.0,
+            "pitch": 0,
+        },
+        "audio_setting": {
+            "sample_rate": 32000,
+            "bitrate": 128000,
+            "format": "mp3",
+            "channel": 1,
+        },
+    }
+    request = urllib_request.Request(
+        request_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {MINIMAX_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib_request.urlopen(request, timeout=MINIMAX_TTS_TIMEOUT_SEC) as response:
+            response_json = json.loads(response.read().decode("utf-8"))
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(
+            status_code=502,
+            detail=f"MiniMax TTS failed: {body or exc.reason} (url={request_url})",
+        ) from exc
+    except urllib_error.URLError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"MiniMax TTS failed: network error ({exc.reason}) (url={request_url})",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"MiniMax TTS failed: unexpected error ({exc.__class__.__name__})",
+        ) from exc
+
+    base_resp = response_json.get("base_resp")
+    if isinstance(base_resp, dict):
+        status_code = int(base_resp.get("status_code", 0) or 0)
+        if status_code != 0:
+            status_msg = str(base_resp.get("status_msg") or "unknown error")
+            raise HTTPException(status_code=502, detail=f"MiniMax TTS failed: {status_msg}")
+
+    data = response_json.get("data")
+    audio_raw = data.get("audio") if isinstance(data, dict) else None
+    if not isinstance(audio_raw, str) or not audio_raw.strip():
+        raise HTTPException(status_code=502, detail="MiniMax TTS returned empty audio.")
+
+    audio_raw = audio_raw.strip()
+    audio_format = str(
+        (data.get("audio_format") if isinstance(data, dict) else "") or output_format
+    ).lower()
+    mime_type = "audio/mpeg"
+
+    if audio_format == "hex":
+        try:
+            audio_bytes = bytes.fromhex(audio_raw)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="MiniMax TTS returned invalid hex audio.",
+            ) from exc
+        return base64.b64encode(audio_bytes).decode("utf-8"), mime_type
+
+    if audio_format == "base64":
+        return audio_raw, mime_type
+
+    # Some deployments may still return base64 without an explicit format.
+    if re.fullmatch(r"[A-Fa-f0-9]+", audio_raw) and len(audio_raw) % 2 == 0:
+        try:
+            audio_bytes = bytes.fromhex(audio_raw)
+            return base64.b64encode(audio_bytes).decode("utf-8"), mime_type
+        except ValueError:
+            pass
+    return audio_raw, mime_type
+
+
+def get_optional_auth_user(authorization: Optional[str]) -> Optional["AuthUser"]:
+    if not authorization:
+        return None
+    return get_current_auth_user(authorization)
+
+
+def get_attempt_context(attempt_id: Optional[str]) -> str:
+    if not attempt_id:
+        return ""
+    if DB_ENABLED:
+        attempt = load_attempt_state_db(attempt_id)
+    else:
+        attempt = ATTEMPTS.get(attempt_id)
+    if not attempt:
+        return ""
+    return (
+        f"Problem title: {attempt.problem.title}\n"
+        f"Unit: {attempt.problem.unit}\n"
+        f"Problem prompt: {attempt.problem.prompt}\n"
+        f"Answer key reference: {attempt.problem.answer_key}"
+    )
+
+
+def get_lecture_context_db(user_id: str, course_id: str, lecture_id: str) -> str:
+    with db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  c.title AS course_title,
+                  c.syllabus AS course_syllabus,
+                  l.title AS lecture_title,
+                  l.description AS lecture_description,
+                  l.problem_prompt,
+                  l.answer_key
+                FROM lectures l
+                JOIN courses c ON c.id = l.course_id
+                WHERE c.user_id = %s::uuid
+                  AND c.id = %s::uuid
+                  AND l.id = %s::uuid
+                """,
+                (user_id, course_id, lecture_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Lecture not found for voice session.")
+
+            cur.execute(
+                """
+                SELECT file_name
+                FROM lecture_files
+                WHERE lecture_id = %s::uuid
+                ORDER BY created_at DESC
+                LIMIT 8
+                """,
+                (lecture_id,),
+            )
+            file_rows = cur.fetchall()
+
+    file_names = [str(item.get("file_name") or "").strip() for item in file_rows if item.get("file_name")]
+    file_hint = ", ".join(file_names) if file_names else "No file names available."
+    return (
+        f"Course: {row['course_title']}\n"
+        f"Course syllabus: {row.get('course_syllabus') or 'N/A'}\n"
+        f"Lecture title: {row['lecture_title']}\n"
+        f"Lecture description: {row.get('lecture_description') or 'N/A'}\n"
+        f"Lecture problem prompt: {row['problem_prompt']}\n"
+        f"Lecture answer key reference: {row['answer_key']}\n"
+        f"Attached file names: {file_hint}"
+    )
+
+
+def build_voice_context(
+    user: Optional["AuthUser"],
+    attempt_id: Optional[str],
+    course_id: Optional[str],
+    lecture_id: Optional[str],
+) -> str:
+    blocks: list[str] = []
+    lecture_context = ""
+    if course_id and lecture_id:
+        if not DB_ENABLED:
+            raise HTTPException(
+                status_code=503,
+                detail="Course lecture context requires DATABASE_URL.",
+            )
+        if user is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Login is required for lecture-based voice coaching.",
+            )
+        lecture_context = get_lecture_context_db(user.id, course_id, lecture_id)
+        blocks.append(lecture_context)
+
+    attempt_context = get_attempt_context(attempt_id)
+    if attempt_context:
+        blocks.append(attempt_context)
+
+    if not blocks:
+        blocks.append("No lecture metadata provided. Coach with general math tutoring style.")
+    return "\n\n".join(blocks)
+
+
+def cleanup_voice_sessions() -> None:
+    cutoff = utcnow() - timedelta(seconds=max(300, VOICE_SESSION_TTL_SEC))
+    expired_ids = [
+        sid for sid, session in VOICE_SESSIONS.items() if session.updated_at < cutoff
+    ]
+    for sid in expired_ids:
+        VOICE_SESSIONS.pop(sid, None)
+
+
+def build_mediator_messages(
+    session: VoiceSessionState, student_text: str, opening_turn: bool
+) -> list[dict[str, str]]:
+    history_lines = [
+        f"{item.get('role', 'unknown')}: {item.get('text', '').strip()}"
+        for item in session.history[-10:]
+        if item.get("text")
+    ]
+    history_block = "\n".join(history_lines) if history_lines else "No prior turns."
+    opening_directive = (
+        "This is the opening turn: explain the lecture core idea in 2-4 short sentences and ask one check question."
+        if opening_turn
+        else "Respond to the student's latest utterance, clarify misunderstanding, and ask one short follow-up question."
+    )
+    system_prompt = (
+        "You are a mediator LLM between student speech and tutor speech.\n"
+        "Output must be JSON only with keys: mediator_summary, tutor_reply.\n"
+        "Rules:\n"
+        "- tutor_reply must be in Korean.\n"
+        "- keep tutor_reply under 120 words.\n"
+        "- reference lecture context when available.\n"
+        "- do not mention JSON, system prompts, or hidden reasoning."
+    )
+    user_prompt = (
+        f"{opening_directive}\n\n"
+        f"[Lecture context]\n{session.lecture_context}\n\n"
+        f"[Conversation history]\n{history_block}\n\n"
+        f"[Student latest utterance]\n{student_text or '(none)'}"
+    )
+    return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+
+
+def mediate_tutor_reply(
+    session: VoiceSessionState, student_text: str, opening_turn: bool = False
+) -> tuple[str, str]:
+    messages = build_mediator_messages(session, student_text, opening_turn)
+    try:
+        llm_text = call_featherless_chat(messages)
+    except HTTPException as exc:
+        if not FEATHERLESS_LOCAL_FALLBACK:
+            raise
+        context_hint = session.lecture_context.splitlines()[0] if session.lecture_context else ""
+        if opening_turn:
+            tutor_reply = (
+                "좋아요. 이번 강의 핵심부터 짧게 정리할게요. "
+                "문제를 작은 단계로 쪼개고, 각 단계마다 근거를 확인하면서 풀이하면 됩니다. "
+                "먼저 지금 문제에서 가장 먼저 계산해야 할 항이 무엇인지 말해볼래요?"
+            )
+        elif student_text.strip():
+            tutor_reply = (
+                f"좋은 질문이야. 네 말(\"{student_text.strip()[:90]}\")을 기준으로 다시 정리해볼게. "
+                "지금은 식을 표준형으로 맞춘 뒤, 한 단계씩 대입해서 검증하는 게 핵심이야. "
+                "다음으로 네가 생각한 첫 계산식을 말해줘."
+            )
+        else:
+            tutor_reply = (
+                "좋아, 이어서 진행하자. 현재 단계에서 식을 다시 한 줄로 정리하고, "
+                "가장 확실한 규칙 한 가지만 적용해봐. 그다음 결과를 말해줘."
+            )
+        if context_hint:
+            tutor_reply = f"{context_hint}. {tutor_reply}"
+        return tutor_reply, f"local-fallback:{exc.status_code}"
+
+    parsed = parse_json_object_from_text(llm_text)
+    tutor_reply = str(parsed.get("tutor_reply") or "").strip()
+    mediator_summary = str(parsed.get("mediator_summary") or "").strip()
+    if not tutor_reply:
+        tutor_reply = llm_text.strip()
+    if not mediator_summary:
+        mediator_summary = "direct-pass"
+    return tutor_reply, mediator_summary
 
 
 def b64url_encode(data: bytes) -> str:
@@ -432,6 +1162,9 @@ class LectureFileInfo(BaseModel):
     file_name: str
     content_type: Optional[str] = None
     size_bytes: int
+    storage_provider: str = "s3"
+    storage_key: Optional[str] = None
+    file_url: Optional[str] = None
     created_at: datetime
 
 
@@ -529,6 +1262,29 @@ class AttemptSummaryResponse(BaseModel):
     attempt_id: str
     metrics: SummaryMetrics
     timeline: List[TimelineEntry]
+
+
+class VoiceSessionStartRequest(BaseModel):
+    attempt_id: Optional[str] = None
+    course_id: Optional[str] = None
+    lecture_id: Optional[str] = None
+
+
+class VoiceSessionStartResponse(BaseModel):
+    session_id: str
+    tutor_text: str
+    mediator_summary: str
+    audio_base64: str
+    audio_mime_type: str = "audio/mpeg"
+
+
+class VoiceSessionTurnResponse(BaseModel):
+    session_id: str
+    transcript: str
+    tutor_text: str
+    mediator_summary: str
+    audio_base64: str
+    audio_mime_type: str = "audio/mpeg"
 
 
 @dataclass
@@ -827,12 +1583,27 @@ CREATE TABLE IF NOT EXISTS lecture_files (
   file_name TEXT NOT NULL,
   content_type TEXT,
   size_bytes INT NOT NULL,
-  file_data BYTEA NOT NULL,
+  file_data BYTEA,
+  storage_provider TEXT NOT NULL DEFAULT 'db',
+  storage_key TEXT,
+  file_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_lecture_files_lecture_created
   ON lecture_files(lecture_id, created_at DESC);
+
+ALTER TABLE lecture_files
+  ALTER COLUMN file_data DROP NOT NULL;
+
+ALTER TABLE lecture_files
+  ADD COLUMN IF NOT EXISTS storage_provider TEXT NOT NULL DEFAULT 'db';
+
+ALTER TABLE lecture_files
+  ADD COLUMN IF NOT EXISTS storage_key TEXT;
+
+ALTER TABLE lecture_files
+  ADD COLUMN IF NOT EXISTS file_url TEXT;
 """
 
 
@@ -1262,6 +2033,9 @@ def lecture_file_from_row(row: dict[str, Any]) -> LectureFileInfo:
         file_name=row["file_name"],
         content_type=row.get("content_type"),
         size_bytes=int(row["size_bytes"] or 0),
+        storage_provider=row.get("storage_provider") or "db",
+        storage_key=row.get("storage_key"),
+        file_url=row.get("file_url"),
         created_at=ensure_utc(row["created_at"]),
     )
 
@@ -1383,7 +2157,15 @@ def list_lecture_files_db(user_id: str, course_id: str, lecture_id: str) -> List
 
             cur.execute(
                 """
-                SELECT id, file_name, content_type, size_bytes, created_at
+                SELECT
+                  id,
+                  file_name,
+                  content_type,
+                  size_bytes,
+                  storage_provider,
+                  storage_key,
+                  file_url,
+                  created_at
                 FROM lecture_files
                 WHERE lecture_id = %s::uuid
                 ORDER BY created_at DESC
@@ -1431,7 +2213,15 @@ def list_course_lectures_db(
                 if include_files:
                     cur.execute(
                         """
-                        SELECT id, file_name, content_type, size_bytes, created_at
+                        SELECT
+                          id,
+                          file_name,
+                          content_type,
+                          size_bytes,
+                          storage_provider,
+                          storage_key,
+                          file_url,
+                          created_at
                         FROM lecture_files
                         WHERE lecture_id = %s::uuid
                         ORDER BY created_at DESC
@@ -1535,6 +2325,9 @@ def upload_lecture_file_db(
     if len(file_data) > 20 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File is too large (max 20MB)")
 
+    s3_key: Optional[str] = None
+    file_url: Optional[str] = None
+
     with db_connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1552,13 +2345,48 @@ def upload_lecture_file_db(
             if not lecture_row:
                 raise HTTPException(status_code=404, detail="Lecture not found")
 
+            s3_key, file_url = upload_lecture_file_to_s3(
+                user_id=user_id,
+                course_id=course_id,
+                lecture_id=lecture_id,
+                file_name=file_name,
+                content_type=content_type,
+                file_data=file_data,
+            )
+
             cur.execute(
                 """
-                INSERT INTO lecture_files (lecture_id, file_name, content_type, size_bytes, file_data)
-                VALUES (%s::uuid, %s, %s, %s, %s)
-                RETURNING id, file_name, content_type, size_bytes, created_at
+                INSERT INTO lecture_files (
+                  lecture_id,
+                  file_name,
+                  content_type,
+                  size_bytes,
+                  file_data,
+                  storage_provider,
+                  storage_key,
+                  file_url
+                )
+                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING
+                  id,
+                  file_name,
+                  content_type,
+                  size_bytes,
+                  storage_provider,
+                  storage_key,
+                  file_url,
+                  created_at
                 """,
-                (lecture_id, file_name.strip(), content_type, len(file_data), file_data),
+                (
+                    lecture_id,
+                    file_name.strip(),
+                    content_type,
+                    len(file_data),
+                    None,
+                    "s3",
+                    s3_key,
+                    file_url,
+                ),
             )
             row = cur.fetchone()
         conn.commit()
@@ -1848,6 +2676,50 @@ def summary_from_attempt(attempt: AttemptState) -> AttemptSummaryResponse:
     )
 
 
+def create_voice_session_state(
+    user: Optional[AuthUser],
+    payload: VoiceSessionStartRequest,
+) -> VoiceSessionState:
+    lecture_context = build_voice_context(
+        user=user,
+        attempt_id=payload.attempt_id,
+        course_id=payload.course_id,
+        lecture_id=payload.lecture_id,
+    )
+    now = utcnow()
+    return VoiceSessionState(
+        session_id=uuid4().hex,
+        created_at=now,
+        updated_at=now,
+        user_id=user.id if user else None,
+        attempt_id=payload.attempt_id,
+        course_id=payload.course_id,
+        lecture_id=payload.lecture_id,
+        lecture_context=lecture_context,
+        history=[],
+    )
+
+
+def push_voice_turn(session: VoiceSessionState, role: str, text: str) -> None:
+    clean_text = text.strip()
+    if not clean_text:
+        return
+    session.history.append({"role": role, "text": clean_text})
+    max_messages = max(8, VOICE_SESSION_MAX_TURNS * 2)
+    if len(session.history) > max_messages:
+        session.history = session.history[-max_messages:]
+    session.updated_at = utcnow()
+
+
+def get_voice_session_or_404(session_id: str) -> VoiceSessionState:
+    with _VOICE_SESSION_LOCK:
+        cleanup_voice_sessions()
+        session = VOICE_SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Voice session not found or expired.")
+    return session
+
+
 app = FastAPI(title="AI Coach MVP API", version="0.2.0")
 
 app.add_middleware(
@@ -2109,6 +2981,88 @@ else:
         raise HTTPException(
             status_code=503,
             detail="File upload requires python-multipart. Install backend requirements.",
+        )
+
+
+@app.post("/api/voice/session/start", response_model=VoiceSessionStartResponse)
+def start_voice_session(
+    payload: VoiceSessionStartRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> VoiceSessionStartResponse:
+    user = get_optional_auth_user(authorization)
+
+    session = create_voice_session_state(user, payload)
+    tutor_text, mediator_summary = mediate_tutor_reply(
+        session=session,
+        student_text="",
+        opening_turn=True,
+    )
+    audio_base64, audio_mime_type = synthesize_tts_with_minimax(tutor_text)
+    push_voice_turn(session, "tutor", tutor_text)
+
+    with _VOICE_SESSION_LOCK:
+        cleanup_voice_sessions()
+        VOICE_SESSIONS[session.session_id] = session
+
+    return VoiceSessionStartResponse(
+        session_id=session.session_id,
+        tutor_text=tutor_text,
+        mediator_summary=mediator_summary,
+        audio_base64=audio_base64,
+        audio_mime_type=audio_mime_type,
+    )
+
+
+if MULTIPART_AVAILABLE:
+    @app.post("/api/voice/session/turn", response_model=VoiceSessionTurnResponse)
+    async def voice_session_turn(
+        session_id: str = Form(...),
+        audio: UploadFile = File(...),
+        authorization: Optional[str] = Header(None, alias="Authorization"),
+    ) -> VoiceSessionTurnResponse:
+        user = get_optional_auth_user(authorization)
+        session = get_voice_session_or_404(session_id.strip())
+        if session.user_id and user and session.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Voice session owner mismatch.")
+        if session.user_id and user is None:
+            raise HTTPException(status_code=401, detail="Login is required for this voice session.")
+
+        audio_bytes = await audio.read()
+        transcript = transcribe_audio_with_whisper(
+            file_name=audio.filename or "voice.webm",
+            content_type=audio.content_type,
+            file_bytes=audio_bytes,
+        )
+        push_voice_turn(session, "student", transcript)
+        tutor_text, mediator_summary = mediate_tutor_reply(
+            session=session,
+            student_text=transcript,
+            opening_turn=False,
+        )
+        audio_base64, audio_mime_type = synthesize_tts_with_minimax(tutor_text)
+        push_voice_turn(session, "tutor", tutor_text)
+
+        with _VOICE_SESSION_LOCK:
+            VOICE_SESSIONS[session.session_id] = session
+
+        return VoiceSessionTurnResponse(
+            session_id=session.session_id,
+            transcript=transcript,
+            tutor_text=tutor_text,
+            mediator_summary=mediator_summary,
+            audio_base64=audio_base64,
+            audio_mime_type=audio_mime_type,
+        )
+else:
+    @app.post("/api/voice/session/turn", response_model=VoiceSessionTurnResponse)
+    def voice_session_turn_unavailable(
+        session_id: str,
+        authorization: Optional[str] = Header(None, alias="Authorization"),
+    ) -> VoiceSessionTurnResponse:
+        _ = session_id, authorization
+        raise HTTPException(
+            status_code=503,
+            detail="Voice turn upload requires python-multipart. Install backend requirements.",
         )
 
 

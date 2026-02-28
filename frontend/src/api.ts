@@ -18,6 +18,8 @@ import type {
   Problem,
   Summary,
   UserRole,
+  VoiceSessionStartResponse,
+  VoiceSessionTurnResponse,
 } from "./types";
 
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -113,6 +115,12 @@ export type CreateLecturePayload = {
   problem_prompt: string;
   answer_key: string;
   sort_order?: number;
+};
+
+export type VoiceSessionStartPayload = {
+  attempt_id?: string;
+  course_id?: string;
+  lecture_id?: string;
 };
 
 export function signup(payload: SignupPayload) {
@@ -234,5 +242,22 @@ export function postDailyProgressEvent(payload: DailyProgressEventPayload) {
   return request<DailyProgress>("/api/progress/daily/events", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function startVoiceSession(payload: VoiceSessionStartPayload) {
+  return request<VoiceSessionStartResponse>("/api/voice/session/start", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function postVoiceSessionTurn(sessionId: string, audioBlob: Blob) {
+  const formData = new FormData();
+  formData.append("session_id", sessionId);
+  formData.append("audio", audioBlob, "student-voice.webm");
+  return request<VoiceSessionTurnResponse>("/api/voice/session/turn", {
+    method: "POST",
+    body: formData,
   });
 }

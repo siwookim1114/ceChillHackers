@@ -54,6 +54,62 @@ DATABASE_URL=postgresql://postgres:<DB_PASSWORD>@team-shared-pg.cebg4w0q26rg.us-
 Backend now uses PostgreSQL automatically when `DATABASE_URL` is present.
 Without `DATABASE_URL`, it falls back to in-memory storage.
 
+## Lecture file storage (S3)
+
+Lecture uploads are stored in S3 under this prefix by default:
+
+```bash
+S3_LECTURE_UPLOAD_URI=s3://cechillhacker-filebucket/docs/lecture_slides/
+```
+
+Set AWS credentials in `.env` (or use an IAM role on the host):
+
+```bash
+AWS_REGION=ap-northeast-2
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+# optional for temporary credentials
+AWS_SESSION_TOKEN=
+```
+
+The backend stores S3 metadata (`storage_key`, `file_url`) in `lecture_files`.
+
+## Voice lecture orchestration (Featherless + Whisper + MiniMax)
+
+The solve page supports a mediated voice tutor flow:
+
+- Student speech -> Whisper-compatible STT
+- Transcript + lecture context -> Featherless LLM mediator
+- Tutor reply text -> MiniMax TTS audio
+
+Set API keys in root `.env`:
+
+```bash
+FEATHERLESS_API_BASE_URL=https://api.featherless.ai/v1
+FEATHERLESS_API_KEY=...
+FEATHERLESS_MODEL=Qwen/Qwen2.5-3B-Instruct
+FEATHERLESS_HTTP_REFERER=http://localhost:5173
+FEATHERLESS_X_TITLE=TutorCoach
+FEATHERLESS_USER_AGENT=TutorCoach/1.0
+# If you get Cloudflare 1010, enable curl transport
+FEATHERLESS_FORCE_CURL=true
+# If Featherless is still blocked, allow temporary local mediator fallback
+FEATHERLESS_LOCAL_FALLBACK=true
+
+WHISPER_API_BASE_URL=https://api.openai.com/v1
+WHISPER_API_KEY=...
+WHISPER_MODEL=whisper-1
+WHISPER_TRANSCRIBE_PATH=/audio/transcriptions
+
+MINIMAX_API_BASE_URL=https://api.minimax.io
+MINIMAX_API_KEY=...
+# Optional on some tenants; set only if your account requires GroupId
+MINIMAX_GROUP_ID=
+MINIMAX_TTS_MODEL=speech-02-hd
+MINIMAX_TTS_VOICE_ID=male-qn-qingse
+MINIMAX_TTS_OUTPUT_FORMAT=hex
+```
+
 ## Run locally
 
 ### Backend

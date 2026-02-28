@@ -9,6 +9,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { PlannerPage } from "./pages/PlannerPage";
 import { PracticePage } from "./pages/PracticePage";
+import { PracticeCoursePage } from "./pages/PracticeCoursePage";
 import { ProgressPage } from "./pages/ProgressPage";
 import { ReportBugPage } from "./pages/ReportBugPage";
 import { ResultPage } from "./pages/ResultPage";
@@ -29,6 +30,7 @@ export default function App() {
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/home" element={<HomePage />} />
       <Route path="/practice" element={<PracticePage />} />
+      <Route path="/practice/course/:courseId" element={<PracticeCoursePage />} />
       <Route path="/create-course" element={<CreateCoursePage />} />
       <Route path="/planner" element={<PlannerPage />} />
       <Route path="/progress" element={<ProgressPage />} />

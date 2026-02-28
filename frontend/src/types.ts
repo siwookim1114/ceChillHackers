@@ -19,6 +19,23 @@ export type AttemptCreateResponse = {
   problem: Problem;
 };
 
+export type VoiceSessionStartResponse = {
+  session_id: string;
+  tutor_text: string;
+  mediator_summary: string;
+  audio_base64: string;
+  audio_mime_type: string;
+};
+
+export type VoiceSessionTurnResponse = {
+  session_id: string;
+  transcript: string;
+  tutor_text: string;
+  mediator_summary: string;
+  audio_base64: string;
+  audio_mime_type: string;
+};
+
 export type EventType =
   | "stroke_add"
   | "stroke_erase"
@@ -117,6 +134,9 @@ export type LectureFileInfo = {
   file_name: string;
   content_type: string | null;
   size_bytes: number;
+  storage_provider?: string;
+  storage_key?: string | null;
+  file_url?: string | null;
   created_at: string;
 };
 

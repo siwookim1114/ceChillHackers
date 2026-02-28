@@ -212,6 +212,16 @@ export function CreateCoursePage() {
     }
   };
 
+  const totalLectureCount = courses.reduce(
+    (sum, course) => sum + course.lecture_count,
+    0,
+  );
+  const totalFileCount = courses.reduce((sum, course) => sum + course.file_count, 0);
+  const selectedLectureCount = selectedCourse?.lectures.length ?? 0;
+  const selectedFileCount =
+    selectedCourse?.lectures.reduce((sum, lecture) => sum + lecture.file_count, 0) ??
+    0;
+
   if (authLoading) {
     return (
       <AppShell title="Create New Course" subtitle="Checking your session...">
@@ -236,27 +246,67 @@ export function CreateCoursePage() {
       subtitle="Create a course folder with syllabus, then add lectures and upload lecture files."
     >
       <div className="create-course-layout">
-        <section className="practice-head-banner reveal reveal-1">
-          <div>
-            <p className="overline">Course Workspace</p>
-            <h3>Create folders and build lecture content</h3>
+        <section className="create-course-hero reveal reveal-1">
+          <div className="create-course-hero-copy">
+            <p className="overline">Course Builder</p>
+            <h3>Design your own practice curriculum</h3>
             <p>
-              Start with a course title and syllabus, then add lectures with
-              prompts and files.
+              Create folders, add lecture prompts, and attach files in one
+              workspace. Each lecture becomes a guided session in Practice
+              Studio.
             </p>
+            <div className="create-course-hero-actions">
+              <button
+                className="btn-primary"
+                onClick={() => navigate("/practice")}
+                type="button"
+              >
+                Open Practice Studio
+              </button>
+              <button
+                className="btn-muted"
+                onClick={() => void loadCourses(selectedCourseId ?? undefined)}
+                type="button"
+              >
+                Refresh Folders
+              </button>
+            </div>
+          </div>
+
+          <div className="create-course-hero-metrics">
+            <article className="create-course-metric">
+              <small>Course Folders</small>
+              <strong>{courses.length}</strong>
+            </article>
+            <article className="create-course-metric">
+              <small>Total Lectures</small>
+              <strong>{totalLectureCount}</strong>
+            </article>
+            <article className="create-course-metric">
+              <small>Total Files</small>
+              <strong>{totalFileCount}</strong>
+            </article>
           </div>
         </section>
 
-        {error && <p className="error">{error}</p>}
+        {error && <p className="error create-course-alert">{error}</p>}
 
         <section className="create-course-grid reveal reveal-2">
           <aside className="panel-card course-builder-panel">
-            <div className="builder-header">
-              <h3>New Course Folder</h3>
-              <p>This creates the parent folder shown in Practice Studio.</p>
+            <div className="create-card-head">
+              <div className="create-card-title-row">
+                <h3>New Course Folder</h3>
+                <span className="create-kpi-chip">
+                  {loadingCourses ? "Syncing..." : `${courses.length} total`}
+                </span>
+              </div>
+              <p>
+                Start with the parent folder. Lectures and files are grouped
+                under this course.
+              </p>
             </div>
 
-            <label>
+            <label className="create-input-label">
               Course Name
               <input
                 onChange={(event) => setCourseTitle(event.target.value)}
@@ -265,7 +315,7 @@ export function CreateCoursePage() {
               />
             </label>
 
-            <label>
+            <label className="create-input-label">
               Syllabus
               <textarea
                 onChange={(event) => setCourseSyllabus(event.target.value)}
@@ -285,7 +335,7 @@ export function CreateCoursePage() {
             </button>
 
             <div className="course-folder-list-wrap">
-              <div className="builder-header compact">
+              <div className="builder-header compact create-folder-head">
                 <h4>Course Folders</h4>
                 <p>
                   {loadingCourses ? "Loading..." : `${courses.length} total`}
@@ -308,9 +358,9 @@ export function CreateCoursePage() {
                   </button>
                 ))}
                 {!loadingCourses && courses.length === 0 && (
-                  <p className="muted">
-                    No folders yet. Create your first course folder.
-                  </p>
+                  <div className="empty-course-state compact">
+                    <p>No folders yet. Create your first course folder.</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -319,10 +369,10 @@ export function CreateCoursePage() {
           <section className="panel-card lecture-workspace-panel">
             {!selectedCourseId && (
               <div className="empty-course-state">
-                <h3>No course selected</h3>
+                <h3>Select or create a course</h3>
                 <p>
-                  Create a course folder first, then lectures and files will
-                  appear here.
+                  Once you choose a folder, you can add lecture prompts and
+                  attach notes/files for each lecture.
                 </p>
               </div>
             )}
@@ -330,12 +380,22 @@ export function CreateCoursePage() {
             {selectedCourseId && (
               <>
                 <div className="workspace-head">
-                  <h3>{selectedCourse?.title ?? "Loading course..."}</h3>
-                  <p>{selectedCourse?.syllabus || "No syllabus yet."}</p>
+                  <div>
+                    <h3>{selectedCourse?.title ?? "Loading course..."}</h3>
+                    <p>{selectedCourse?.syllabus || "No syllabus yet."}</p>
+                  </div>
+                  <div className="create-workspace-kpis">
+                    <span className="create-kpi-chip">
+                      {selectedLectureCount} lectures
+                    </span>
+                    <span className="create-kpi-chip">
+                      {selectedFileCount} files
+                    </span>
+                  </div>
                 </div>
 
                 <div className="lecture-form-grid">
-                  <label>
+                  <label className="create-input-label">
                     Lecture Title
                     <input
                       onChange={(event) => setLectureTitle(event.target.value)}
@@ -344,7 +404,7 @@ export function CreateCoursePage() {
                     />
                   </label>
 
-                  <label>
+                  <label className="create-input-label">
                     Description (Optional)
                     <input
                       onChange={(event) =>
@@ -355,7 +415,7 @@ export function CreateCoursePage() {
                     />
                   </label>
 
-                  <label>
+                  <label className="create-input-label">
                     Practice Prompt
                     <textarea
                       onChange={(event) => setLecturePrompt(event.target.value)}
@@ -365,7 +425,7 @@ export function CreateCoursePage() {
                     />
                   </label>
 
-                  <label>
+                  <label className="create-input-label">
                     Answer Key
                     <input
                       onChange={(event) => setLectureAnswer(event.target.value)}
@@ -410,13 +470,16 @@ export function CreateCoursePage() {
 
                       <div className="lecture-upload-row">
                         <label
-                          className="btn-muted file-upload-btn"
+                          className="btn-muted file-upload-btn create-upload-btn"
                           htmlFor={`file-${lecture.id}`}
                         >
                           {uploadingLectureId === lecture.id
                             ? "Uploading..."
                             : "Upload Lecture File"}
                         </label>
+                        <small className="muted">
+                          PDF, docs, and notes supported
+                        </small>
                         <input
                           className="upload-input"
                           id={`file-${lecture.id}`}

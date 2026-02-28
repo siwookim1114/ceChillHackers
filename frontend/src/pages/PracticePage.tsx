@@ -1,43 +1,35 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ApiError,
-  createAttempt,
-  getCourseDetail,
-  getMe,
-  listCourses,
-  postDailyProgressEvent,
-} from "../api";
-import {
-  clearAuthSession,
-  getAccessToken,
-  getAuthUser,
-  saveAuthSession,
-} from "../auth";
+import { ApiError, getMe, listCourses } from "../api";
+import { clearAuthSession, getAccessToken, saveAuthSession } from "../auth";
 import { AppShell } from "../components/AppShell";
-import type {
-  AuthUser,
-  CourseDetail,
-  CourseFolder,
-  LectureItem,
-} from "../types";
+import type { CourseFolder } from "../types";
+
+function FolderTileIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="practice-folder-icon"
+      viewBox="0 0 88 64"
+    >
+      <path
+        className="folder-back"
+        d="M7 22a8 8 0 0 1 8-8h18l7 7h33a8 8 0 0 1 8 8v21a8 8 0 0 1-8 8H15a8 8 0 0 1-8-8V22Z"
+      />
+      <path
+        className="folder-front"
+        d="M7 30h74v20a8 8 0 0 1-8 8H15a8 8 0 0 1-8-8V30Z"
+      />
+      <path className="folder-shine" d="M16 35h22a3 3 0 0 1 0 6H16a3 3 0 0 1 0-6Z" />
+    </svg>
+  );
+}
 
 export function PracticePage() {
   const navigate = useNavigate();
-  const [user, setUser] = useState<AuthUser | null>(() => getAuthUser());
   const [authLoading, setAuthLoading] = useState(true);
-
   const [courses, setCourses] = useState<CourseFolder[]>([]);
-  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
-  const [selectedCourse, setSelectedCourse] = useState<CourseDetail | null>(
-    null,
-  );
-
   const [loadingCourses, setLoadingCourses] = useState(true);
-  const [loadingLectures, setLoadingLectures] = useState(false);
-  const [launchingLectureId, setLaunchingLectureId] = useState<string | null>(
-    null,
-  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,7 +42,6 @@ export function PracticePage() {
     getMe()
       .then((me) => {
         saveAuthSession(token, me);
-        setUser(me);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) {
@@ -66,12 +57,6 @@ export function PracticePage() {
     try {
       const nextCourses = await listCourses();
       setCourses(nextCourses);
-      setSelectedCourseId((previous) => {
-        if (previous && nextCourses.some((course) => course.id === previous)) {
-          return previous;
-        }
-        return nextCourses[0]?.id ?? null;
-      });
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to load course folders",
@@ -88,69 +73,11 @@ export function PracticePage() {
     loadCourses();
   }, [authLoading]);
 
-  useEffect(() => {
-    if (!selectedCourseId) {
-      setSelectedCourse(null);
-      return;
-    }
-
-    setLoadingLectures(true);
-    getCourseDetail(selectedCourseId)
-      .then(setSelectedCourse)
-      .catch((err: Error) => {
-        setError(err.message || "Failed to load lectures");
-        setSelectedCourse(null);
-      })
-      .finally(() => setLoadingLectures(false));
-  }, [selectedCourseId]);
-
-  const getActorId = () => {
-    if (user) {
-      return `user_${user.id}`;
-    }
-    const existing = localStorage.getItem("guest_id");
-    if (existing) {
-      return existing;
-    }
-    const next = `guest_${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem("guest_id", next);
-    return next;
-  };
-
-  const startLecturePractice = async (lecture: LectureItem) => {
-    if (!selectedCourse) {
-      return;
-    }
-
-    setLaunchingLectureId(lecture.id);
-    setError(null);
-
-    try {
-      const attempt = await createAttempt({
-        guest_id: getActorId(),
-        problem_text: lecture.problem_prompt,
-        answer_key: lecture.answer_key,
-        unit: selectedCourse.title,
-      });
-
-      if (getAccessToken() && user) {
-        postDailyProgressEvent({
-          event_type: "set_current_topic",
-          topic: selectedCourse.title,
-        }).catch(() => {
-          // Keep solve flow uninterrupted when progress sync fails.
-        });
-      }
-
-      navigate(`/solve/${attempt.attempt_id}`);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to start lecture practice",
-      );
-    } finally {
-      setLaunchingLectureId(null);
-    }
-  };
+  const totalLectureCount = courses.reduce(
+    (sum, course) => sum + course.lecture_count,
+    0,
+  );
+  const totalFileCount = courses.reduce((sum, course) => sum + course.file_count, 0);
 
   if (authLoading) {
     return (
@@ -182,140 +109,103 @@ export function PracticePage() {
       subtitle="Open a course folder and start practice from its lectures."
     >
       <div className="practice-page-wrap">
-        <section className="practice-head-banner reveal reveal-1">
-          <div>
+        <section className="practice-studio-hero reveal reveal-1">
+          <div className="practice-hero-copy">
             <p className="overline">Course Folders</p>
-            <h3>Practice by lecture, inside each course</h3>
+            <h3>Launch focused sessions from your own curriculum</h3>
             <p>
-              Pick a folder on the left, then launch any lecture as a guided
-              solving session.
+              Pick a folder, choose a lecture, and jump straight into guided
+              solving. Every lecture starts a clean attempt flow.
             </p>
+            <div className="practice-hero-actions">
+              <button
+                className="btn-primary"
+                onClick={() => navigate("/create-course")}
+                type="button"
+              >
+                Build New Course
+              </button>
+              <button
+                className="btn-muted"
+                onClick={() => void loadCourses()}
+                type="button"
+              >
+                Refresh Folders
+              </button>
+            </div>
           </div>
-          <button
-            className="btn-primary"
-            onClick={() => navigate("/create-course")}
-            type="button"
-          >
-            Create New Course
-          </button>
+
+          <div className="practice-hero-metrics">
+            <article className="practice-metric-card">
+              <small>Folders</small>
+              <strong>{courses.length}</strong>
+            </article>
+            <article className="practice-metric-card">
+              <small>Lectures</small>
+              <strong>{totalLectureCount}</strong>
+            </article>
+            <article className="practice-metric-card">
+              <small>Files</small>
+              <strong>{totalFileCount}</strong>
+            </article>
+          </div>
         </section>
 
-        {error && <p className="error">{error}</p>}
+        {error && <p className="error practice-alert">{error}</p>}
 
-        <section className="practice-course-layout reveal reveal-2">
-          <aside className="panel-card course-folder-panel">
-            <div className="home-header">
-              <h3>Folders</h3>
-              <span className="user-pill">
-                <strong>{courses.length}</strong>
-                <span>courses</span>
-              </span>
+        <section className="panel-card practice-folder-panel practice-folder-gallery reveal reveal-2">
+          <div className="practice-section-head">
+            <div>
+              <p className="overline">Library</p>
+              <h3>Course Folders</h3>
             </div>
+            <span className="create-kpi-chip">
+              {loadingCourses ? "Syncing..." : `${courses.length} total`}
+            </span>
+          </div>
 
-            {loadingCourses && (
-              <div className="catalog-skeleton" aria-label="Loading folders">
-                <div className="skeleton-line skeleton-line-medium" />
-                <div className="skeleton-grid-3">
-                  <span className="skeleton-block" />
-                  <span className="skeleton-block" />
-                  <span className="skeleton-block" />
-                </div>
+          {loadingCourses && (
+            <div className="catalog-skeleton" aria-label="Loading folders">
+              <div className="skeleton-line skeleton-line-medium" />
+              <div className="skeleton-grid-3">
+                <span className="skeleton-block" />
+                <span className="skeleton-block" />
+                <span className="skeleton-block" />
               </div>
-            )}
+            </div>
+          )}
 
-            <div className="course-folder-list">
-              {courses.map((course) => (
+          <div className="course-folder-list">
+            {courses.map((course) => (
+              <button
+                className="course-folder-item practice-folder-item"
+                key={course.id}
+                onClick={() => navigate(`/practice/course/${course.id}`)}
+                title={course.title}
+                type="button"
+              >
+                <span className="practice-folder-icon-wrap">
+                  <FolderTileIcon />
+                </span>
+                <strong className="practice-folder-title">{course.title}</strong>
+                <small className="practice-folder-meta">
+                  {course.lecture_count} lectures • {course.file_count} files
+                </small>
+              </button>
+            ))}
+            {!loadingCourses && courses.length === 0 && (
+              <div className="empty-course-state compact">
+                <p>No course folders yet.</p>
                 <button
-                  className={`course-folder-item${selectedCourseId === course.id ? " active" : ""}`}
-                  key={course.id}
-                  onClick={() => setSelectedCourseId(course.id)}
+                  className="btn-muted"
+                  onClick={() => navigate("/create-course")}
                   type="button"
                 >
-                  <strong>{course.title}</strong>
-                  <small>
-                    {course.lecture_count} lectures • {course.file_count} files
-                  </small>
+                  Create your first course
                 </button>
-              ))}
-              {!loadingCourses && courses.length === 0 && (
-                <div className="empty-course-state compact">
-                  <p>No course folders yet.</p>
-                  <button
-                    className="btn-muted"
-                    onClick={() => navigate("/create-course")}
-                    type="button"
-                  >
-                    Create your first course
-                  </button>
-                </div>
-              )}
-            </div>
-          </aside>
-
-          <section className="panel-card lecture-list-panel">
-            {!selectedCourseId && (
-              <div className="empty-course-state">
-                <h3>No folder selected</h3>
-                <p>Select a course folder to view lectures.</p>
               </div>
             )}
-
-            {selectedCourseId && (
-              <>
-                <div className="workspace-head">
-                  <h3>{selectedCourse?.title ?? "Loading..."}</h3>
-                  <p>{selectedCourse?.syllabus || "No syllabus yet."}</p>
-                </div>
-
-                {loadingLectures && (
-                  <p className="muted">Loading lectures...</p>
-                )}
-                {!loadingLectures &&
-                  selectedCourse &&
-                  selectedCourse.lectures.length === 0 && (
-                    <div className="empty-course-state compact">
-                      <p>No lectures in this folder yet.</p>
-                      <button
-                        className="btn-muted"
-                        onClick={() => navigate("/create-course")}
-                        type="button"
-                      >
-                        Add lectures in Create New Course
-                      </button>
-                    </div>
-                  )}
-
-                <div className="lecture-practice-list">
-                  {selectedCourse?.lectures.map((lecture) => (
-                    <article className="lecture-practice-card" key={lecture.id}>
-                      <div className="lecture-admin-head">
-                        <div>
-                          <h4>{lecture.title}</h4>
-                          <p>{lecture.description || "No description"}</p>
-                        </div>
-                        <span className="unit-tag">
-                          {lecture.file_count} files
-                        </span>
-                      </div>
-
-                      <p className="problem-prompt">{lecture.problem_prompt}</p>
-
-                      <button
-                        className="btn-primary"
-                        disabled={launchingLectureId === lecture.id}
-                        onClick={() => startLecturePractice(lecture)}
-                        type="button"
-                      >
-                        {launchingLectureId === lecture.id
-                          ? "Starting..."
-                          : "Start This Lecture"}
-                      </button>
-                    </article>
-                  ))}
-                </div>
-              </>
-            )}
-          </section>
+          </div>
         </section>
       </div>
     </AppShell>

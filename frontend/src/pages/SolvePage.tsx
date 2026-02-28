@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { getAttempt, getIntervention, postEvents } from "../api";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+  getAttempt,
+  getIntervention,
+  postEvents,
+  postVoiceSessionTurn,
+  startVoiceSession,
+} from "../api";
 import { AppShell } from "../components/AppShell";
 import { CoachPanel } from "../components/CoachPanel";
 import type { Attempt, ClientEvent, Intervention, StuckSignals } from "../types";
@@ -13,6 +19,47 @@ const INITIAL_SIGNALS: StuckSignals = {
 };
 
 type SolveStage = "ready" | "lecture" | "solve";
+type VoiceRole = "student" | "tutor";
+type VoiceMessage = {
+  id: string;
+  role: VoiceRole;
+  text: string;
+};
+
+const LECTURE_VIDEO_POOL = [
+  "whitemale satisifcation.mp4",
+  "whitemale(mad+fadeout).mp4",
+  "whitemale1 .mp4",
+  "whitemale2.mp4",
+  "whitemale3.mp4",
+  "whitemale4.mp4",
+  "whitemale5.mp4",
+  "whitemale6.mp4",
+].map((fileName) => `/${encodeURIComponent(fileName)}`);
+
+function pickRandomLectureVideo(previous?: string | null): string {
+  if (LECTURE_VIDEO_POOL.length === 0) {
+    return "/intro.mp4";
+  }
+  if (LECTURE_VIDEO_POOL.length === 1) {
+    return LECTURE_VIDEO_POOL[0];
+  }
+  let next = LECTURE_VIDEO_POOL[Math.floor(Math.random() * LECTURE_VIDEO_POOL.length)];
+  while (next === previous) {
+    next = LECTURE_VIDEO_POOL[Math.floor(Math.random() * LECTURE_VIDEO_POOL.length)];
+  }
+  return next;
+}
+
+function base64ToObjectUrl(base64Data: string, mimeType: string): string {
+  const binary = window.atob(base64Data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const blob = new Blob([bytes], { type: mimeType || "audio/mpeg" });
+  return URL.createObjectURL(blob);
+}
 
 function SoundToggleIcon({ muted }: { muted: boolean }) {
   if (muted) {
@@ -54,6 +101,9 @@ function SoundToggleIcon({ muted }: { muted: boolean }) {
 export function SolvePage() {
   const { attemptId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const courseId = searchParams.get("courseId");
+  const lectureId = searchParams.get("lectureId");
 
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [stage, setStage] = useState<SolveStage>("ready");
@@ -62,10 +112,18 @@ export function SolvePage() {
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState<string | null>(null);
   const [lectureMuted, setLectureMuted] = useState(true);
+  const [lectureVideoSrc, setLectureVideoSrc] = useState<string>(() => pickRandomLectureVideo());
   const [isStageTransitioning, setIsStageTransitioning] = useState(false);
   const [signals, setSignals] = useState<StuckSignals>(INITIAL_SIGNALS);
   const [intervention, setIntervention] = useState<Intervention | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null);
+  const [voiceMessages, setVoiceMessages] = useState<VoiceMessage[]>([]);
+  const [voiceMediator, setVoiceMediator] = useState<string>("");
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceAudioUrl, setVoiceAudioUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const queueRef = useRef<ClientEvent[]>([]);
@@ -74,6 +132,9 @@ export function SolvePage() {
   const lectureVideoRef = useRef<HTMLVideoElement | null>(null);
   const stageChangeTimerRef = useRef<number | null>(null);
   const stageSettleTimerRef = useRef<number | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
 
   const clearStageTimers = useCallback(() => {
     if (stageChangeTimerRef.current !== null) {
@@ -174,14 +235,27 @@ export function SolvePage() {
       if (uploadedPreviewUrl) {
         URL.revokeObjectURL(uploadedPreviewUrl);
       }
+      if (voiceAudioUrl) {
+        URL.revokeObjectURL(voiceAudioUrl);
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
       clearStageTimers();
     };
-  }, [clearStageTimers, uploadedPreviewUrl]);
+  }, [clearStageTimers, uploadedPreviewUrl, voiceAudioUrl]);
 
   const transitionToStage = useCallback(
     (nextStage: SolveStage) => {
       if (nextStage === stage || isStageTransitioning) {
         return;
+      }
+      if (nextStage === "lecture") {
+        setLectureVideoSrc((previous) => pickRandomLectureVideo(previous));
       }
       setError(null);
       clearStageTimers();
@@ -283,6 +357,203 @@ export function SolvePage() {
     });
     await flushQueue();
   };
+
+  const appendVoiceMessage = (role: VoiceRole, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    setVoiceMessages((previous) => [
+      ...previous,
+      {
+        id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role,
+        text: trimmed,
+      },
+    ]);
+  };
+
+  const applyVoiceAudio = (audioBase64: string, audioMimeType: string) => {
+    if (!audioBase64) {
+      return;
+    }
+    if (voiceAudioUrl) {
+      URL.revokeObjectURL(voiceAudioUrl);
+    }
+    const nextUrl = base64ToObjectUrl(audioBase64, audioMimeType);
+    setVoiceAudioUrl(nextUrl);
+  };
+
+  const startVoiceLecture = async () => {
+    if (!attemptId) {
+      return;
+    }
+    setVoiceBusy(true);
+    setVoiceError(null);
+    try {
+      const response = await startVoiceSession({
+        attempt_id: attemptId,
+        course_id: courseId || undefined,
+        lecture_id: lectureId || undefined,
+      });
+      setVoiceSessionId(response.session_id);
+      setVoiceMessages([
+        {
+          id: `tutor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: "tutor",
+          text: response.tutor_text,
+        },
+      ]);
+      setVoiceMediator(response.mediator_summary);
+      applyVoiceAudio(response.audio_base64, response.audio_mime_type);
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : "Failed to start voice lecture");
+    } finally {
+      setVoiceBusy(false);
+    }
+  };
+
+  const sendRecordedTurn = async (audioBlob: Blob) => {
+    if (!voiceSessionId) {
+      setVoiceError("Start voice lecture first.");
+      return;
+    }
+    setVoiceBusy(true);
+    setVoiceError(null);
+    try {
+      const response = await postVoiceSessionTurn(voiceSessionId, audioBlob);
+      appendVoiceMessage("student", response.transcript);
+      appendVoiceMessage("tutor", response.tutor_text);
+      setVoiceMediator(response.mediator_summary);
+      applyVoiceAudio(response.audio_base64, response.audio_mime_type);
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : "Voice interaction failed");
+    } finally {
+      setVoiceBusy(false);
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    if (voiceRecording || voiceBusy) {
+      return;
+    }
+    if (!voiceSessionId) {
+      setVoiceError("Start voice lecture first.");
+      return;
+    }
+    setVoiceError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "";
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        setVoiceRecording(false);
+        const chunks = [...recordingChunksRef.current];
+        recordingChunksRef.current = [];
+        const audioType = recorder.mimeType || "audio/webm";
+        if (chunks.length > 0) {
+          const audioBlob = new Blob(chunks, { type: audioType });
+          void sendRecordedTurn(audioBlob);
+        }
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+          recordingStreamRef.current = null;
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setVoiceRecording(true);
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : "Microphone permission failed");
+      setVoiceRecording(false);
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      return;
+    }
+    recorder.stop();
+  };
+
+  const renderVoiceCoachPanel = () => (
+    <section className="panel-card voice-coach-panel">
+      <div className="voice-coach-head">
+        <div>
+          <p className="overline">Live Voice Coach</p>
+          <h4>Featherless Mediated Lecture + MiniMax Voice</h4>
+        </div>
+        <span className={`voice-dot${voiceRecording ? " recording" : ""}`}>
+          {voiceRecording ? "Recording" : voiceSessionId ? "Ready" : "Idle"}
+        </span>
+      </div>
+
+      <p className="muted">
+        Start a voice lecture, speak your question, and get mediated tutor replies as audio.
+      </p>
+
+      <div className="action-row">
+        <button className="btn-primary" disabled={voiceBusy || voiceRecording} onClick={startVoiceLecture} type="button">
+          {voiceBusy && !voiceRecording ? "Connecting..." : voiceSessionId ? "Restart Voice Lecture" : "Start Voice Lecture"}
+        </button>
+        <button
+          className="btn-teal"
+          disabled={!voiceSessionId || voiceBusy || voiceRecording}
+          onClick={startVoiceRecording}
+          type="button"
+        >
+          Talk to Tutor
+        </button>
+        <button
+          className="btn-muted"
+          disabled={!voiceRecording}
+          onClick={stopVoiceRecording}
+          type="button"
+        >
+          Stop & Send
+        </button>
+      </div>
+
+      {voiceMediator && <p className="voice-mediator-tag">LLM mediator: {voiceMediator}</p>}
+      {voiceError && <p className="error">{voiceError}</p>}
+
+      <div className="voice-log">
+        {voiceMessages.length === 0 && (
+          <p className="muted">No voice turns yet. Press “Start Voice Lecture”.</p>
+        )}
+        {voiceMessages.map((message) => (
+          <article key={message.id} className={`voice-bubble ${message.role}`}>
+            <strong>{message.role === "tutor" ? "Tutor" : "You"}</strong>
+            <p>{message.text}</p>
+          </article>
+        ))}
+      </div>
+
+      {voiceAudioUrl && (
+        <audio autoPlay className="voice-audio-player" controls src={voiceAudioUrl}>
+          Your browser does not support audio playback.
+        </audio>
+      )}
+    </section>
+  );
 
   if (loading) {
     return (
@@ -389,13 +660,14 @@ export function SolvePage() {
             <video
               autoPlay
               className="lecture-video"
+              key={lectureVideoSrc}
               loop
               muted={lectureMuted}
               playsInline
               preload="metadata"
               ref={lectureVideoRef}
             >
-              <source src="/intro.mp4" type="video/mp4" />
+              <source src={lectureVideoSrc} type="video/mp4" />
               Your browser does not support the video tag.
             </video>
             <button
@@ -412,6 +684,7 @@ export function SolvePage() {
             <p className="overline">AI Tutor Live Lecture</p>
             <h3>{attempt.problem.title}</h3>
             <p>{attempt.problem.prompt}</p>
+            {renderVoiceCoachPanel()}
             <div className="entry-cta-row">
               <button
                 className="btn-primary"
@@ -434,12 +707,13 @@ export function SolvePage() {
                 <video
                   autoPlay
                   className="lecture-mini-video"
+                  key={`${lectureVideoSrc}-mini`}
                   loop
                   muted
                   playsInline
                   preload="metadata"
                 >
-                  <source src="/intro.mp4" type="video/mp4" />
+                  <source src={lectureVideoSrc} type="video/mp4" />
                   Your browser does not support the video tag.
                 </video>
               </div>
@@ -501,6 +775,8 @@ export function SolvePage() {
                   rows={7}
                 />
               </div>
+
+              {renderVoiceCoachPanel()}
 
               <div className="action-row">
                 <button className="btn-muted" onClick={clearWorkNotes} type="button">
