@@ -5,7 +5,14 @@ psycopg[binary]==3.2.12
 python-dotenv==1.1.1
 python-multipart==0.0.20
 boto3
+faster-whisper
+pdfplumber
 langchain-core
+langchain
+langchain-community
+langchain-huggingface
+langchain-text-splitters
 langchain-openai
 langchain-aws
+sentence-transformers
 pytest==9.0.2

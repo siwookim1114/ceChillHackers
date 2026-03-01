@@ -129,12 +129,13 @@ WHISPER_API_BASE_URL = os.getenv("WHISPER_API_BASE_URL", "https://api.openai.com
 WHISPER_API_KEY = os.getenv("WHISPER_API_KEY", "").strip()
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "whisper-1").strip()
 WHISPER_TRANSCRIBE_PATH = os.getenv("WHISPER_TRANSCRIBE_PATH", "/audio/transcriptions").strip()
+WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "en").strip().lower()
 WHISPER_TIMEOUT_SEC = float(os.getenv("WHISPER_TIMEOUT_SEC", "45"))
 MINIMAX_API_BASE_URL = os.getenv("MINIMAX_API_BASE_URL", "https://api.minimax.io").strip()
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "").strip()
 MINIMAX_GROUP_ID = os.getenv("MINIMAX_GROUP_ID", "").strip()
 MINIMAX_TTS_MODEL = os.getenv("MINIMAX_TTS_MODEL", "speech-02-hd").strip()
-MINIMAX_TTS_VOICE_ID = os.getenv("MINIMAX_TTS_VOICE_ID", "male-qn-qingse").strip()
+MINIMAX_TTS_VOICE_ID = os.getenv("MINIMAX_TTS_VOICE_ID", "English_Insightful_Speaker").strip()
 MINIMAX_TTS_OUTPUT_FORMAT = os.getenv("MINIMAX_TTS_OUTPUT_FORMAT", "hex").strip().lower()
 MINIMAX_TTS_TIMEOUT_SEC = float(os.getenv("MINIMAX_TTS_TIMEOUT_SEC", "30"))
 VOICE_SESSION_TTL_SEC = int(os.getenv("VOICE_SESSION_TTL_SEC", "3600"))
@@ -615,8 +616,11 @@ def transcribe_audio_with_whisper(file_name: str, content_type: Optional[str], f
         raise HTTPException(status_code=400, detail="Audio file is empty.")
 
     mime_type = content_type or "audio/webm"
+    fields = {"model": WHISPER_MODEL}
+    if WHISPER_LANGUAGE and WHISPER_LANGUAGE != "auto":
+        fields["language"] = WHISPER_LANGUAGE
     form_body, boundary = build_multipart_form_data(
-        fields={"model": WHISPER_MODEL},
+        fields=fields,
         file_field_name="file",
         file_name=file_name or "voice.webm",
         file_bytes=file_bytes,
@@ -880,7 +884,7 @@ def build_mediator_messages(
         "You are a mediator LLM between student speech and tutor speech.\n"
         "Output must be JSON only with keys: mediator_summary, tutor_reply.\n"
         "Rules:\n"
-        "- tutor_reply must be in Korean.\n"
+        "- tutor_reply must be in English.\n"
         "- keep tutor_reply under 120 words.\n"
         "- reference lecture context when available.\n"
         "- do not mention JSON, system prompts, or hidden reasoning."
@@ -906,20 +910,20 @@ def mediate_tutor_reply(
         context_hint = session.lecture_context.splitlines()[0] if session.lecture_context else ""
         if opening_turn:
             tutor_reply = (
-                "좋아요. 이번 강의 핵심부터 짧게 정리할게요. "
-                "문제를 작은 단계로 쪼개고, 각 단계마다 근거를 확인하면서 풀이하면 됩니다. "
-                "먼저 지금 문제에서 가장 먼저 계산해야 할 항이 무엇인지 말해볼래요?"
+                "Great, let me summarize the core idea first. "
+                "Break the problem into small steps and verify the reasoning at each step. "
+                "What is the very first term or quantity you should compute?"
             )
         elif student_text.strip():
             tutor_reply = (
-                f"좋은 질문이야. 네 말(\"{student_text.strip()[:90]}\")을 기준으로 다시 정리해볼게. "
-                "지금은 식을 표준형으로 맞춘 뒤, 한 단계씩 대입해서 검증하는 게 핵심이야. "
-                "다음으로 네가 생각한 첫 계산식을 말해줘."
+                f"Good question. Based on what you said (\"{student_text.strip()[:90]}\"), let's reframe it. "
+                "The key move now is to put the expression in standard form, then verify each substitution step by step. "
+                "What is your first calculation line?"
             )
         else:
             tutor_reply = (
-                "좋아, 이어서 진행하자. 현재 단계에서 식을 다시 한 줄로 정리하고, "
-                "가장 확실한 규칙 한 가지만 적용해봐. 그다음 결과를 말해줘."
+                "Good, let's continue. Rewrite the expression in one clean line at this stage, "
+                "apply the single most reliable rule, and tell me the result."
             )
         if context_hint:
             tutor_reply = f"{context_hint}. {tutor_reply}"
