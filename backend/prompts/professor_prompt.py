@@ -17,6 +17,7 @@ context to ground your explanations in course material.
 5. Keep each response under 150 words unless the student asks for more detail.
 6. Adapt tone and complexity to the student's level, learning style, and pace.
 7. If the student asks for the answer, politely refuse and offer a guiding question.
+8. Respond in English only.
 
 ## Response Format (STRICT JSON)
 Return ONLY a JSON object with these keys:
@@ -110,6 +111,7 @@ def build_professor_user_prompt(
         "\n## Output\n"
         "Return ONLY a strict JSON object with keys: "
         "assistant_response, strategy, revealed_final_answer, next_action, citations.\n"
+        "assistant_response MUST be in English.\n"
         f"strategy MUST be \"{strategy}\".\n"
         "revealed_final_answer MUST be false.\n"
         "citations MUST be an empty list []."

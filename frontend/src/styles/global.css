@@ -51,15 +51,27 @@ body {
   font-family: "Manrope", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at 85% -10%, rgba(37, 99, 235, 0.2), transparent 38%),
+    radial-gradient(
+      circle at 85% -10%,
+      rgba(37, 99, 235, 0.2),
+      transparent 38%
+    ),
     radial-gradient(circle at -5% 0%, rgba(34, 197, 94, 0.12), transparent 30%),
     linear-gradient(165deg, var(--bg), var(--bg-2));
 }
 
 :root[data-theme="dark"] body {
   background:
-    radial-gradient(circle at 85% -10%, rgba(14, 165, 233, 0.18), transparent 38%),
-    radial-gradient(circle at -5% 0%, rgba(59, 130, 246, 0.18), transparent 30%),
+    radial-gradient(
+      circle at 85% -10%,
+      rgba(14, 165, 233, 0.18),
+      transparent 38%
+    ),
+    radial-gradient(
+      circle at -5% 0%,
+      rgba(59, 130, 246, 0.18),
+      transparent 30%
+    ),
     linear-gradient(165deg, var(--bg), var(--bg-2));
 }
 
@@ -100,7 +112,9 @@ select {
   color: var(--ink);
   padding: 11px 12px;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 input:focus,
@@ -731,7 +745,9 @@ label {
   padding: 10px 16px;
   cursor: pointer;
   font-weight: 700;
-  transition: transform 0.15s ease, filter 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
 }
 
 .btn-primary:hover,
@@ -1121,8 +1137,16 @@ label {
   gap: 16px;
   padding: 16px 18px 18px;
   background:
-    radial-gradient(circle at 100% -10%, rgba(56, 189, 248, 0.2), transparent 34%),
-    radial-gradient(circle at -10% 0%, rgba(74, 222, 128, 0.14), transparent 32%),
+    radial-gradient(
+      circle at 100% -10%,
+      rgba(56, 189, 248, 0.2),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at -10% 0%,
+      rgba(74, 222, 128, 0.14),
+      transparent 32%
+    ),
     #f8fbff;
 }
 
@@ -1176,7 +1200,9 @@ label {
   transform: translateX(-115%);
   opacity: 0;
   pointer-events: none;
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
 }
 
 .app-sidebar.immersive-sidebar.floating-open {
@@ -1302,7 +1328,10 @@ label {
   align-items: center;
   gap: 8px;
   background: #ffffff;
-  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background-color 0.18s ease;
 }
 
 .side-link:hover {
@@ -1400,7 +1429,10 @@ label {
   box-shadow:
     0 18px 32px rgba(15, 23, 42, 0.08),
     0 4px 10px rgba(15, 23, 42, 0.06);
-  transition: transform 0.28s ease, opacity 0.28s ease, box-shadow 0.22s ease;
+  transition:
+    transform 0.28s ease,
+    opacity 0.28s ease,
+    box-shadow 0.22s ease;
 }
 
 .shell-topbar.topbar-hover-mode {
@@ -1543,7 +1575,9 @@ label {
   opacity: 0;
   transform: translateY(-8px);
   pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
   overflow: hidden;
   z-index: 40;
 }
@@ -1945,7 +1979,9 @@ label {
   text-align: left;
   cursor: pointer;
   border-radius: 22px;
-  transition: transform 0.18s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.2s ease;
 }
 
 .dashboard-link-card h4 {
@@ -1982,8 +2018,16 @@ label {
   gap: 14px;
   grid-template-columns: minmax(0, 1.2fr) 260px;
   background:
-    radial-gradient(140% 120% at 0% 100%, rgba(234, 179, 8, 0.26), transparent 60%),
-    radial-gradient(140% 130% at 100% 0%, rgba(56, 189, 248, 0.2), transparent 58%),
+    radial-gradient(
+      140% 120% at 0% 100%,
+      rgba(234, 179, 8, 0.26),
+      transparent 60%
+    ),
+    radial-gradient(
+      140% 130% at 100% 0%,
+      rgba(56, 189, 248, 0.2),
+      transparent 58%
+    ),
     linear-gradient(125deg, #1e293b 0%, #0f172a 56%, #0b3558 100%);
   box-shadow: 0 24px 42px rgba(15, 23, 42, 0.36);
 }
@@ -2081,8 +2125,16 @@ label {
   gap: 14px;
   grid-template-columns: minmax(0, 1.2fr) 280px;
   background:
-    radial-gradient(120% 120% at 0% 0%, rgba(16, 185, 129, 0.42), transparent 56%),
-    radial-gradient(140% 120% at 100% 100%, rgba(45, 212, 191, 0.3), transparent 68%),
+    radial-gradient(
+      120% 120% at 0% 0%,
+      rgba(16, 185, 129, 0.42),
+      transparent 56%
+    ),
+    radial-gradient(
+      140% 120% at 100% 100%,
+      rgba(45, 212, 191, 0.3),
+      transparent 68%
+    ),
     linear-gradient(132deg, #062c30 0%, #0f766e 50%, #115e59 100%);
   box-shadow: 0 22px 40px rgba(6, 44, 48, 0.32);
 }
@@ -2232,7 +2284,10 @@ label {
   gap: 3px;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease;
 }
 
 .course-folder-item strong {
@@ -2385,7 +2440,11 @@ label {
   border: 1px solid #dbeafe;
   border-radius: 22px;
   background:
-    radial-gradient(140% 130% at 100% 0%, rgba(224, 242, 254, 0.7), transparent 55%),
+    radial-gradient(
+      140% 130% at 100% 0%,
+      rgba(224, 242, 254, 0.7),
+      transparent 55%
+    ),
     linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   box-shadow: 0 16px 30px rgba(15, 23, 42, 0.08);
   padding: 16px;
@@ -2411,8 +2470,16 @@ label {
   padding: 16px;
   border: 1px solid #bfdbfe;
   background:
-    radial-gradient(150% 120% at 0% 100%, rgba(147, 197, 253, 0.28), transparent 58%),
-    radial-gradient(140% 120% at 100% 0%, rgba(34, 197, 94, 0.18), transparent 62%),
+    radial-gradient(
+      150% 120% at 0% 100%,
+      rgba(147, 197, 253, 0.28),
+      transparent 58%
+    ),
+    radial-gradient(
+      140% 120% at 100% 0%,
+      rgba(34, 197, 94, 0.18),
+      transparent 62%
+    ),
     linear-gradient(140deg, #ffffff 0%, #f0f9ff 100%);
   box-shadow: 0 14px 30px rgba(30, 64, 175, 0.1);
   display: grid;
@@ -2632,7 +2699,11 @@ label {
   border-color: #dbeafe;
   border-radius: 15px;
   background:
-    radial-gradient(140% 130% at 100% 0%, rgba(219, 234, 254, 0.52), transparent 52%),
+    radial-gradient(
+      140% 130% at 100% 0%,
+      rgba(219, 234, 254, 0.52),
+      transparent 52%
+    ),
     linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   padding: 13px;
 }
@@ -2652,11 +2723,19 @@ label {
     opacity: 0;
     transform: translateY(6px);
     pointer-events: none;
-    transition: opacity 0.2s ease, transform 0.2s ease;
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease;
   }
 
-  .practice-lecture-panel .lecture-practice-card:hover .lecture-practice-foot .btn-primary,
-  .practice-lecture-panel .lecture-practice-card:focus-within .lecture-practice-foot .btn-primary {
+  .practice-lecture-panel
+    .lecture-practice-card:hover
+    .lecture-practice-foot
+    .btn-primary,
+  .practice-lecture-panel
+    .lecture-practice-card:focus-within
+    .lecture-practice-foot
+    .btn-primary {
     opacity: 1;
     transform: translateY(0);
     pointer-events: auto;
@@ -2696,7 +2775,11 @@ label {
 .create-course-layout .lecture-workspace-panel {
   border: 1px solid #d7efe9;
   background:
-    radial-gradient(120% 120% at 100% 0%, rgba(209, 250, 229, 0.56), transparent 46%),
+    radial-gradient(
+      120% 120% at 100% 0%,
+      rgba(209, 250, 229, 0.56),
+      transparent 46%
+    ),
     linear-gradient(180deg, #ffffff 0%, #f7fffb 100%);
   box-shadow: 0 18px 30px rgba(15, 118, 110, 0.08);
   border-radius: 22px;
@@ -2917,8 +3000,7 @@ label {
   width: 150px;
   height: 150px;
   border-radius: 50%;
-  background:
-    conic-gradient(#2563eb var(--progress), #dbeafe 0%);
+  background: conic-gradient(#2563eb var(--progress), #dbeafe 0%);
   position: relative;
   display: grid;
   place-items: center;
@@ -3143,8 +3225,16 @@ label {
 
 :root[data-theme="dark"] .dashboard-shell {
   background:
-    radial-gradient(circle at 100% -10%, rgba(6, 182, 212, 0.2), transparent 34%),
-    radial-gradient(circle at -10% 0%, rgba(37, 99, 235, 0.16), transparent 32%),
+    radial-gradient(
+      circle at 100% -10%,
+      rgba(6, 182, 212, 0.2),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at -10% 0%,
+      rgba(37, 99, 235, 0.16),
+      transparent 32%
+    ),
     #0f172a;
 }
 
@@ -3448,7 +3538,10 @@ label {
   padding: 14px;
   display: grid;
   gap: 10px;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
 }
 
 .problem-card:hover {
@@ -3587,7 +3680,11 @@ label {
   padding: 22px;
   border-radius: 28px;
   background:
-    radial-gradient(circle at 100% 0, rgba(14, 165, 233, 0.14), transparent 34%),
+    radial-gradient(
+      circle at 100% 0,
+      rgba(14, 165, 233, 0.14),
+      transparent 34%
+    ),
     linear-gradient(180deg, #ffffff, #f8fbff);
 }
 
@@ -3599,7 +3696,10 @@ label {
   opacity: 0.82;
   filter: blur(1.2px);
   transform: scale(0.996);
-  transition: opacity 0.18s ease, filter 0.18s ease, transform 0.18s ease;
+  transition:
+    opacity 0.18s ease,
+    filter 0.18s ease,
+    transform 0.18s ease;
 }
 
 .stage-transition-overlay {
@@ -3639,12 +3739,24 @@ label {
   animation: stage-item-in 0.52s cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
 }
 
-.lesson-setup-main > *:nth-child(1) { animation-delay: 0.04s; }
-.lesson-setup-main > *:nth-child(2) { animation-delay: 0.08s; }
-.lesson-setup-main > *:nth-child(3) { animation-delay: 0.12s; }
-.lesson-setup-main > *:nth-child(4) { animation-delay: 0.16s; }
-.lesson-setup-main > *:nth-child(5) { animation-delay: 0.2s; }
-.lesson-setup-main > *:nth-child(6) { animation-delay: 0.24s; }
+.lesson-setup-main > *:nth-child(1) {
+  animation-delay: 0.04s;
+}
+.lesson-setup-main > *:nth-child(2) {
+  animation-delay: 0.08s;
+}
+.lesson-setup-main > *:nth-child(3) {
+  animation-delay: 0.12s;
+}
+.lesson-setup-main > *:nth-child(4) {
+  animation-delay: 0.16s;
+}
+.lesson-setup-main > *:nth-child(5) {
+  animation-delay: 0.2s;
+}
+.lesson-setup-main > *:nth-child(6) {
+  animation-delay: 0.24s;
+}
 
 .lecture-launch h3 {
   font-family: "Sora", sans-serif;
@@ -3692,9 +3804,15 @@ label {
   animation: step-slide-in 0.48s cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
 }
 
-.flow-step:nth-child(1) { animation-delay: 0.22s; }
-.flow-step:nth-child(2) { animation-delay: 0.3s; }
-.flow-step:nth-child(3) { animation-delay: 0.38s; }
+.flow-step:nth-child(1) {
+  animation-delay: 0.22s;
+}
+.flow-step:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.flow-step:nth-child(3) {
+  animation-delay: 0.38s;
+}
 
 .flow-step:hover {
   transform: translateX(2px);
@@ -3804,10 +3922,18 @@ label {
   animation: stage-item-in 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
 }
 
-.lecture-copy > *:nth-child(1) { animation-delay: 0.1s; }
-.lecture-copy > *:nth-child(2) { animation-delay: 0.16s; }
-.lecture-copy > *:nth-child(3) { animation-delay: 0.22s; }
-.lecture-copy > *:nth-child(4) { animation-delay: 0.28s; }
+.lecture-copy > *:nth-child(1) {
+  animation-delay: 0.1s;
+}
+.lecture-copy > *:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.lecture-copy > *:nth-child(3) {
+  animation-delay: 0.22s;
+}
+.lecture-copy > *:nth-child(4) {
+  animation-delay: 0.28s;
+}
 
 .lecture-copy h3 {
   font-family: "Sora", sans-serif;
@@ -3870,7 +3996,10 @@ label {
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+  transition:
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
 }
 
 .upload-dropzone::after {
@@ -3927,8 +4056,11 @@ label {
 
 .voice-coach-panel {
   border: 1px solid #dbeafe;
-  background:
-    linear-gradient(140deg, rgba(241, 245, 255, 0.92), rgba(236, 253, 245, 0.88));
+  background: linear-gradient(
+    140deg,
+    rgba(241, 245, 255, 0.92),
+    rgba(236, 253, 245, 0.88)
+  );
   border-radius: 14px;
   padding: 12px;
   display: grid;
@@ -3997,6 +4129,11 @@ label {
   color: #334155;
 }
 
+.voice-bubble small {
+  font-size: 0.7rem;
+  color: #475569;
+}
+
 .voice-bubble p {
   margin: 0;
   font-size: 0.88rem;
@@ -4012,6 +4149,11 @@ label {
 .voice-bubble.student {
   border: 1px solid #bbf7d0;
   background: #f0fdf4;
+}
+
+.voice-bubble.system {
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
 }
 
 .voice-audio-player {
@@ -4877,7 +5019,11 @@ label {
 
 :root[data-theme="dark"] .lecture-launch {
   background:
-    radial-gradient(circle at 100% 0, rgba(56, 189, 248, 0.16), transparent 34%),
+    radial-gradient(
+      circle at 100% 0,
+      rgba(56, 189, 248, 0.16),
+      transparent 34%
+    ),
     linear-gradient(180deg, #111b2e, #132238);
 }
 
@@ -4941,7 +5087,11 @@ label {
 
 :root[data-theme="dark"] .voice-coach-panel {
   border-color: #36598b;
-  background: linear-gradient(140deg, rgba(19, 34, 56, 0.96), rgba(20, 38, 59, 0.92));
+  background: linear-gradient(
+    140deg,
+    rgba(19, 34, 56, 0.96),
+    rgba(20, 38, 59, 0.92)
+  );
 }
 
 :root[data-theme="dark"] .voice-dot {
@@ -4979,8 +5129,17 @@ label {
   color: #cbd5e1;
 }
 
+:root[data-theme="dark"] .voice-bubble small {
+  color: #94a3b8;
+}
+
 :root[data-theme="dark"] .voice-bubble p {
   color: #e2e8f0;
+}
+
+:root[data-theme="dark"] .voice-bubble.system {
+  border-color: #334155;
+  background: #0f172a;
 }
 
 :root[data-theme="dark"] .skeleton-line,

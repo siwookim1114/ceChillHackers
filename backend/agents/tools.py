@@ -82,7 +82,7 @@ class ProfessorRespondTool(BaseTool):
     llm_temperature: float = 0.3
     llm_max_tokens: int = 800
     featherless_base_url: str = "https://api.featherless.ai/v1"
-    featherless_api_key_env: str = "FEATHERLESS_API_KEY"
+    featherless_api_key_env: str = "FEATHERLESSAI_API_KEY"
     featherless_user_agent: str = "ceChillHackers-professor/1.0"
     runtime_timeout_sec: int = 30
     runtime_retries: int = 0
@@ -109,7 +109,7 @@ class ProfessorRespondTool(BaseTool):
             provider_cfg.get("base_url", "https://api.featherless.ai/v1")
         ).rstrip("/")
         self.featherless_api_key_env = str(
-            provider_cfg.get("api_key_env", "FEATHERLESS_API_KEY")
+            provider_cfg.get("api_key_env", "FEATHERLESSAI_API_KEY")
         )
         self.featherless_user_agent = str(
             provider_cfg.get("user_agent", "ceChillHackers-professor/1.0")

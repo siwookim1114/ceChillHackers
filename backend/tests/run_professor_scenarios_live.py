@@ -74,8 +74,8 @@ def _apply_mode_default(payload: dict[str, Any]) -> dict[str, Any]:
 def main() -> int:
     load_dotenv(ROOT_DIR / ".env", override=False)
 
-    if not os.getenv("FEATHERLESS_API_KEY", "").strip():
-        print("Missing FEATHERLESS_API_KEY. Set it in .env or shell environment.")
+    if not os.getenv("FEATHERLESSAI_API_KEY", "").strip():
+        print("Missing FEATHERLESSAI_API_KEY. Set it in .env or shell environment.")
         return 1
 
     # Force live Featherless path for this runner.

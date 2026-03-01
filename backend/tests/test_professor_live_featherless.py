@@ -29,7 +29,7 @@ def _load_live_payloads() -> list[dict]:
 
 
 def _has_required_env() -> bool:
-    return bool(os.getenv("FEATHERLESS_API_KEY"))
+    return bool(os.getenv("FEATHERLESSAI_API_KEY"))
 
 
 def _live_test_enabled() -> bool:
@@ -52,7 +52,7 @@ def test_professor_live_featherless_outputs_valid_schema_for_dummy_payloads(
         pytest.skip("Set RUN_LIVE_FEATHERLESS_TEST=1 to run live Featherless integration test")
 
     if not _has_required_env():
-        pytest.skip("Missing FEATHERLESS_API_KEY for live Featherless test")
+        pytest.skip("Missing FEATHERLESSAI_API_KEY for live Featherless test")
 
     monkeypatch.setenv("PROFESSOR_USE_LIVE_FEATHERLESS", "1")
 

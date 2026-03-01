@@ -1,29 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
+  gradeAttemptSubmission,
   getAttempt,
   getIntervention,
+  postOrchestratorChat,
+  postOrchestratorVoice,
   postEvents,
-  postVoiceSessionTurn,
-  startVoiceSession,
 } from "../api";
 import { AppShell } from "../components/AppShell";
 import { CoachPanel } from "../components/CoachPanel";
-import type { Attempt, ClientEvent, Intervention, StuckSignals } from "../types";
+import type {
+  Attempt,
+  AttemptGradeResponse,
+  ClientEvent,
+  Intervention,
+  OrchestratorChatResponse,
+  OrchestratorVoiceResponse,
+  StuckSignals,
+} from "../types";
 
 const INITIAL_SIGNALS: StuckSignals = {
   idle_ms: 0,
   erase_count_delta: 0,
   repeated_error_count: 0,
-  stuck_score: 0
+  stuck_score: 0,
 };
 
 type SolveStage = "ready" | "lecture" | "solve";
-type VoiceRole = "student" | "tutor";
+type VoiceRole = "student" | "tutor" | "system";
 type VoiceMessage = {
   id: string;
   role: VoiceRole;
   text: string;
+  meta?: string;
 };
 
 const LECTURE_VIDEO_POOL = [
@@ -44,9 +54,11 @@ function pickRandomLectureVideo(previous?: string | null): string {
   if (LECTURE_VIDEO_POOL.length === 1) {
     return LECTURE_VIDEO_POOL[0];
   }
-  let next = LECTURE_VIDEO_POOL[Math.floor(Math.random() * LECTURE_VIDEO_POOL.length)];
+  let next =
+    LECTURE_VIDEO_POOL[Math.floor(Math.random() * LECTURE_VIDEO_POOL.length)];
   while (next === previous) {
-    next = LECTURE_VIDEO_POOL[Math.floor(Math.random() * LECTURE_VIDEO_POOL.length)];
+    next =
+      LECTURE_VIDEO_POOL[Math.floor(Math.random() * LECTURE_VIDEO_POOL.length)];
   }
   return next;
 }
@@ -64,7 +76,12 @@ function base64ToObjectUrl(base64Data: string, mimeType: string): string {
 function SoundToggleIcon({ muted }: { muted: boolean }) {
   if (muted) {
     return (
-      <svg aria-hidden="true" className="sound-toggle-icon" fill="none" viewBox="0 0 24 24">
+      <svg
+        aria-hidden="true"
+        className="sound-toggle-icon"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
         <path
           d="M4 10h4l5-4v12l-5-4H4z"
           stroke="currentColor"
@@ -81,7 +98,12 @@ function SoundToggleIcon({ muted }: { muted: boolean }) {
     );
   }
   return (
-    <svg aria-hidden="true" className="sound-toggle-icon" fill="none" viewBox="0 0 24 24">
+    <svg
+      aria-hidden="true"
+      className="sound-toggle-icon"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
       <path
         d="M4 10h4l5-4v12l-5-4H4z"
         stroke="currentColor"
@@ -101,29 +123,37 @@ function SoundToggleIcon({ muted }: { muted: boolean }) {
 export function SolvePage() {
   const { attemptId } = useParams();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const courseId = searchParams.get("courseId");
-  const lectureId = searchParams.get("lectureId");
 
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [stage, setStage] = useState<SolveStage>("ready");
   const [workText, setWorkText] = useState("");
   const [answer, setAnswer] = useState("");
+  const [uploadedWorkFile, setUploadedWorkFile] = useState<File | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
-  const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState<string | null>(null);
+  const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState<string | null>(
+    null,
+  );
   const [lectureMuted, setLectureMuted] = useState(true);
-  const [lectureVideoSrc, setLectureVideoSrc] = useState<string>(() => pickRandomLectureVideo());
+  const [lectureVideoSrc, setLectureVideoSrc] = useState<string>(() =>
+    pickRandomLectureVideo(),
+  );
   const [isStageTransitioning, setIsStageTransitioning] = useState(false);
   const [signals, setSignals] = useState<StuckSignals>(INITIAL_SIGNALS);
   const [intervention, setIntervention] = useState<Intervention | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null);
+  const [voiceThreadId, setVoiceThreadId] = useState<string | null>(null);
+  const [voiceInputText, setVoiceInputText] = useState("");
   const [voiceMessages, setVoiceMessages] = useState<VoiceMessage[]>([]);
-  const [voiceMediator, setVoiceMediator] = useState<string>("");
+  const [voiceStatusMeta, setVoiceStatusMeta] = useState<string>("");
+  const [voiceAwaitingFeedback, setVoiceAwaitingFeedback] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceAudioUrl, setVoiceAudioUrl] = useState<string | null>(null);
+  const [gradeBusy, setGradeBusy] = useState(false);
+  const [gradeResult, setGradeResult] = useState<AttemptGradeResponse | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
 
   const queueRef = useRef<ClientEvent[]>([]);
@@ -206,8 +236,8 @@ export function SolvePage() {
       enqueueEvent({
         type: "idle_ping",
         payload: {
-          idle_ms: Date.now() - lastActionRef.current
-        }
+          idle_ms: Date.now() - lastActionRef.current,
+        },
       });
     }, 10000);
 
@@ -238,7 +268,10 @@ export function SolvePage() {
       if (voiceAudioUrl) {
         URL.revokeObjectURL(voiceAudioUrl);
       }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state !== "inactive"
+      ) {
         mediaRecorderRef.current.stop();
       }
       if (recordingStreamRef.current) {
@@ -269,7 +302,7 @@ export function SolvePage() {
         }, 220);
       }, 160);
     },
-    [clearStageTimers, isStageTransitioning, stage]
+    [clearStageTimers, isStageTransitioning, stage],
   );
 
   const onWorkChange = (value: string) => {
@@ -277,8 +310,8 @@ export function SolvePage() {
     enqueueEvent({
       type: "stroke_add",
       payload: {
-        char_count: value.length
-      }
+        char_count: value.length,
+      },
     });
   };
 
@@ -290,8 +323,8 @@ export function SolvePage() {
     enqueueEvent({
       type: "stroke_erase",
       payload: {
-        char_count: 0
-      }
+        char_count: 0,
+      },
     });
   };
 
@@ -300,6 +333,8 @@ export function SolvePage() {
       return;
     }
     setError(null);
+    setGradeResult(null);
+    setUploadedWorkFile(file);
     setUploadedFileName(file.name);
     if (uploadedPreviewUrl) {
       URL.revokeObjectURL(uploadedPreviewUrl);
@@ -313,8 +348,8 @@ export function SolvePage() {
       type: "stroke_add",
       payload: {
         upload_name: file.name,
-        upload_size: file.size
-      }
+        upload_size: file.size,
+      },
     });
   };
 
@@ -338,27 +373,61 @@ export function SolvePage() {
     enqueueEvent({
       type: "hint_request",
       payload: {
-        source: "coach_button"
-      }
+        source: "coach_button",
+      },
     });
     await flushQueue();
   };
 
   const submitAnswer = async () => {
-    if (!uploadedFileName) {
+    if (!uploadedWorkFile || !uploadedFileName) {
       setError("Please upload your solved work image or file first.");
       return;
     }
-    enqueueEvent({
-      type: "answer_submit",
-      payload: {
-        answer
+    if (!attemptId) {
+      setError("Missing attempt id");
+      return;
+    }
+
+    setGradeBusy(true);
+    setError(null);
+    try {
+      // Flush queued interaction events first so TA grading sees recent solving signals.
+      await flushQueue();
+      const result = await gradeAttemptSubmission(
+        attemptId,
+        uploadedWorkFile,
+        workText,
+        answer,
+      );
+      setGradeResult(result);
+      setSignals(result.stuck_signals);
+      if (result.solved) {
+        navigate(`/result/${attemptId}`);
       }
-    });
-    await flushQueue();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to grade submission",
+      );
+    } finally {
+      setGradeBusy(false);
+    }
   };
 
-  const appendVoiceMessage = (role: VoiceRole, text: string) => {
+  const createVoiceThreadId = useCallback(() => {
+    return `voice-${attemptId ?? "session"}-${Date.now().toString(36)}`;
+  }, [attemptId]);
+
+  const ensureVoiceThreadId = useCallback(() => {
+    if (voiceThreadId) {
+      return voiceThreadId;
+    }
+    const nextThreadId = createVoiceThreadId();
+    setVoiceThreadId(nextThreadId);
+    return nextThreadId;
+  }, [createVoiceThreadId, voiceThreadId]);
+
+  const appendVoiceMessage = (role: VoiceRole, text: string, meta?: string) => {
     const trimmed = text.trim();
     if (!trimmed) {
       return;
@@ -369,6 +438,7 @@ export function SolvePage() {
         id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role,
         text: trimmed,
+        meta: meta?.trim() || undefined,
       },
     ]);
   };
@@ -384,50 +454,114 @@ export function SolvePage() {
     setVoiceAudioUrl(nextUrl);
   };
 
-  const startVoiceLecture = async () => {
-    if (!attemptId) {
-      return;
+  const buildVoiceTopic = () => {
+    const unit = attempt?.problem.unit?.trim();
+    if (unit) {
+      return unit;
     }
+    const title = attempt?.problem.title?.trim();
+    if (title) {
+      return title;
+    }
+    return "general";
+  };
+
+  const handleOrchestratorTurn = (
+    response: OrchestratorChatResponse | OrchestratorVoiceResponse,
+  ) => {
+    const bubbleMetaParts = [
+      response.agent_name || "assistant",
+      response.intent || "",
+      response.route_used ? `route:${response.route_used}` : "",
+    ].filter(Boolean);
+    appendVoiceMessage(
+      "tutor",
+      response.response_text,
+      bubbleMetaParts.join(" · "),
+    );
+
+    const statusParts = [
+      response.agent_name ? `agent ${response.agent_name}` : "",
+      response.intent ? `intent ${response.intent}` : "",
+      response.rag_found ? `RAG ${response.rag_citations_count}` : "RAG 0",
+      response.awaiting_feedback ? "awaiting feedback" : "continue",
+      `turn ${response.turn_count}`,
+    ].filter(Boolean);
+    setVoiceStatusMeta(statusParts.join(" · "));
+    setVoiceAwaitingFeedback(response.awaiting_feedback);
+  };
+
+  const startVoiceLecture = async () => {
+    const nextThreadId = createVoiceThreadId();
+    setVoiceThreadId(nextThreadId);
+    setVoiceError(null);
+    setVoiceAwaitingFeedback(false);
+    setVoiceStatusMeta("session ready");
+    setVoiceInputText("");
+    setVoiceMessages([
+      {
+        id: `system-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role: "system",
+        text: "Voice orchestrator session is ready. Speak or type your question.",
+        meta: nextThreadId,
+      },
+    ]);
+  };
+
+  const sendRecordedTurn = async (audioBlob: Blob) => {
+    const sessionId = ensureVoiceThreadId();
     setVoiceBusy(true);
     setVoiceError(null);
     try {
-      const response = await startVoiceSession({
-        attempt_id: attemptId,
-        course_id: courseId || undefined,
-        lecture_id: lectureId || undefined,
+      const response = await postOrchestratorVoice(audioBlob, {
+        session_id: sessionId,
+        topic: buildVoiceTopic(),
+        level: "intermediate",
+        learning_style: "mixed",
+        pace: "medium",
+        mode: "strict",
+        knowledge_mode: "internal_only",
       });
-      setVoiceSessionId(response.session_id);
-      setVoiceMessages([
-        {
-          id: `tutor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          role: "tutor",
-          text: response.tutor_text,
-        },
-      ]);
-      setVoiceMediator(response.mediator_summary);
-      applyVoiceAudio(response.audio_base64, response.audio_mime_type);
+      appendVoiceMessage("student", response.transcript);
+      handleOrchestratorTurn(response);
+      if (response.audio_base64) {
+        applyVoiceAudio(response.audio_base64, "audio/mpeg");
+      }
     } catch (err) {
-      setVoiceError(err instanceof Error ? err.message : "Failed to start voice lecture");
+      setVoiceError(
+        err instanceof Error ? err.message : "Voice orchestration failed",
+      );
     } finally {
       setVoiceBusy(false);
     }
   };
 
-  const sendRecordedTurn = async (audioBlob: Blob) => {
-    if (!voiceSessionId) {
-      setVoiceError("Start voice lecture first.");
+  const sendTextTurn = async () => {
+    const message = voiceInputText.trim();
+    if (!message || voiceBusy || voiceRecording) {
       return;
     }
+    const sessionId = ensureVoiceThreadId();
+    setVoiceInputText("");
+    appendVoiceMessage("student", message);
     setVoiceBusy(true);
     setVoiceError(null);
     try {
-      const response = await postVoiceSessionTurn(voiceSessionId, audioBlob);
-      appendVoiceMessage("student", response.transcript);
-      appendVoiceMessage("tutor", response.tutor_text);
-      setVoiceMediator(response.mediator_summary);
-      applyVoiceAudio(response.audio_base64, response.audio_mime_type);
+      const response = await postOrchestratorChat({
+        session_id: sessionId,
+        message,
+        topic: buildVoiceTopic(),
+        level: "intermediate",
+        learning_style: "mixed",
+        pace: "medium",
+        mode: "strict",
+        knowledge_mode: "internal_only",
+      });
+      handleOrchestratorTurn(response);
     } catch (err) {
-      setVoiceError(err instanceof Error ? err.message : "Voice interaction failed");
+      setVoiceError(
+        err instanceof Error ? err.message : "Text orchestration failed",
+      );
     } finally {
       setVoiceBusy(false);
     }
@@ -437,10 +571,7 @@ export function SolvePage() {
     if (voiceRecording || voiceBusy) {
       return;
     }
-    if (!voiceSessionId) {
-      setVoiceError("Start voice lecture first.");
-      return;
-    }
+    ensureVoiceThreadId();
     setVoiceError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -468,7 +599,9 @@ export function SolvePage() {
           void sendRecordedTurn(audioBlob);
         }
         if (recordingStreamRef.current) {
-          recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+          recordingStreamRef.current
+            .getTracks()
+            .forEach((track) => track.stop());
           recordingStreamRef.current = null;
         }
       };
@@ -477,7 +610,9 @@ export function SolvePage() {
       recorder.start();
       setVoiceRecording(true);
     } catch (err) {
-      setVoiceError(err instanceof Error ? err.message : "Microphone permission failed");
+      setVoiceError(
+        err instanceof Error ? err.message : "Microphone permission failed",
+      );
       setVoiceRecording(false);
       if (recordingStreamRef.current) {
         recordingStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -499,24 +634,38 @@ export function SolvePage() {
       <div className="voice-coach-head">
         <div>
           <p className="overline">Live Voice Coach</p>
-          <h4>Featherless Mediated Lecture + MiniMax Voice</h4>
+          <h4>Orchestrator Voice + HITL Feedback</h4>
         </div>
         <span className={`voice-dot${voiceRecording ? " recording" : ""}`}>
-          {voiceRecording ? "Recording" : voiceSessionId ? "Ready" : "Idle"}
+          {voiceRecording
+            ? "Recording"
+            : voiceBusy
+              ? "Processing"
+              : voiceAwaitingFeedback
+                ? "Awaiting Feedback"
+                : voiceThreadId
+                  ? "Ready"
+                  : "Idle"}
         </span>
       </div>
 
       <p className="muted">
-        Start a voice lecture, speak your question, and get mediated tutor replies as audio.
+        Voice uses `/api/chat/voice`. Your speech transcript is shown in chat,
+        and when HITL review is pending you can speak or type feedback directly.
       </p>
 
       <div className="action-row">
-        <button className="btn-primary" disabled={voiceBusy || voiceRecording} onClick={startVoiceLecture} type="button">
-          {voiceBusy && !voiceRecording ? "Connecting..." : voiceSessionId ? "Restart Voice Lecture" : "Start Voice Lecture"}
+        <button
+          className="btn-primary"
+          disabled={voiceBusy || voiceRecording}
+          onClick={startVoiceLecture}
+          type="button"
+        >
+          {voiceThreadId ? "Reset Voice Session" : "Start Voice Session"}
         </button>
         <button
           className="btn-teal"
-          disabled={!voiceSessionId || voiceBusy || voiceRecording}
+          disabled={voiceBusy || voiceRecording}
           onClick={startVoiceRecording}
           type="button"
         >
@@ -532,28 +681,86 @@ export function SolvePage() {
         </button>
       </div>
 
-      {voiceMediator && <p className="voice-mediator-tag">LLM mediator: {voiceMediator}</p>}
+      <div className="answer-input-row">
+        <input
+          disabled={voiceBusy || voiceRecording}
+          onChange={(event) => setVoiceInputText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void sendTextTurn();
+            }
+          }}
+          placeholder={
+            voiceAwaitingFeedback
+              ? "Type feedback like: looks good / explain differently / give problems"
+              : "Type to tutor (same orchestrator session)"
+          }
+          value={voiceInputText}
+        />
+        <button
+          className="btn-muted"
+          disabled={voiceBusy || voiceRecording}
+          onClick={() => void sendTextTurn()}
+          type="button"
+        >
+          Send Text
+        </button>
+      </div>
+
+      {voiceStatusMeta && (
+        <p className="voice-mediator-tag">{voiceStatusMeta}</p>
+      )}
       {voiceError && <p className="error">{voiceError}</p>}
 
       <div className="voice-log">
         {voiceMessages.length === 0 && (
-          <p className="muted">No voice turns yet. Press “Start Voice Lecture”.</p>
+          <p className="muted">
+            No turns yet. Press Start Voice Session, then speak or type.
+          </p>
         )}
         {voiceMessages.map((message) => (
           <article key={message.id} className={`voice-bubble ${message.role}`}>
-            <strong>{message.role === "tutor" ? "Tutor" : "You"}</strong>
+            <strong>
+              {message.role === "student"
+                ? "You"
+                : message.role === "system"
+                  ? "System"
+                  : "Tutor"}
+            </strong>
+            {message.meta && <small>{message.meta}</small>}
             <p>{message.text}</p>
           </article>
         ))}
       </div>
 
       {voiceAudioUrl && (
-        <audio autoPlay className="voice-audio-player" controls src={voiceAudioUrl}>
+        <audio
+          autoPlay
+          className="voice-audio-player"
+          controls
+          src={voiceAudioUrl}
+        >
           Your browser does not support audio playback.
         </audio>
       )}
     </section>
   );
+
+  const taResult: Record<string, unknown> = gradeResult?.ta_result ?? {};
+  const partialScoreRaw = taResult["partial_score"];
+  const partialScore =
+    typeof partialScoreRaw === "object" && partialScoreRaw !== null
+      ? (partialScoreRaw as Record<string, unknown>)
+      : null;
+  const parserDiagnostics: Record<string, unknown> =
+    gradeResult?.parser_diagnostics ?? {};
+  const parserWarningsRaw = parserDiagnostics["warnings"];
+  const parserWarnings = Array.isArray(parserWarningsRaw)
+    ? parserWarningsRaw.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
 
   if (loading) {
     return (
@@ -586,233 +793,312 @@ export function SolvePage() {
       hideContentHeader
       topbarRevealOnHover={stage === "lecture"}
     >
-      <div className={`stage-transition-frame${isStageTransitioning ? " switching" : ""}`}>
-      {stage === "ready" && (
-        <section className="panel-card lecture-launch stage-enter">
-          <div className="lesson-setup-grid">
-            <div className="lesson-setup-main">
-              <p className="overline">Lesson Setup</p>
+      <div
+        className={`stage-transition-frame${isStageTransitioning ? " switching" : ""}`}
+      >
+        {stage === "ready" && (
+          <section className="panel-card lecture-launch stage-enter">
+            <div className="lesson-setup-grid">
+              <div className="lesson-setup-main">
+                <p className="overline">Lesson Setup</p>
+                <h3>{attempt.problem.title}</h3>
+                <p>
+                  The avatar lecture explains the core concept first, then
+                  automatically switches to a split layout with tutor on the
+                  left and sketch board on the right.
+                </p>
+
+                <div className="lesson-meta-row">
+                  <span className="lesson-meta-chip">
+                    Unit: {attempt.problem.unit}
+                  </span>
+                  <span className="lesson-meta-chip">Lecture first</span>
+                  <span className="lesson-meta-chip">Upload-based solving</span>
+                </div>
+
+                <div className="lesson-setup-flow">
+                  <div className="flow-step">
+                    <strong>1</strong>
+                    <span>Start Lecture</span>
+                  </div>
+                  <div className="flow-step">
+                    <strong>2</strong>
+                    <span>Watch tutor guidance</span>
+                  </div>
+                  <div className="flow-step">
+                    <strong>3</strong>
+                    <span>Upload your solved work</span>
+                  </div>
+                </div>
+
+                <div className="lesson-actions">
+                  <button
+                    className="btn-primary"
+                    disabled={isStageTransitioning}
+                    onClick={() => transitionToStage("lecture")}
+                    type="button"
+                  >
+                    Start Lecture
+                  </button>
+                  <button
+                    className="btn-muted"
+                    disabled={isStageTransitioning}
+                    onClick={() => transitionToStage("solve")}
+                    type="button"
+                  >
+                    Skip to Solving
+                  </button>
+                </div>
+              </div>
+
+              <aside className="lesson-preview-card">
+                <p className="overline">Problem Preview</p>
+                <div className="problem-statement">
+                  {attempt.problem.prompt}
+                </div>
+                <div className="lesson-preview-note">
+                  <strong>After lecture</strong>
+                  <p>
+                    The avatar view shrinks to the left, and the solved-work
+                    upload board appears on the right.
+                  </p>
+                </div>
+              </aside>
+            </div>
+          </section>
+        )}
+
+        {stage === "lecture" && (
+          <section className="panel-card lecture-stage lecture-stage-full stage-enter">
+            <div className="lecture-video-wrap">
+              <video
+                autoPlay
+                className="lecture-video"
+                key={lectureVideoSrc}
+                loop
+                muted={lectureMuted}
+                playsInline
+                preload="metadata"
+                ref={lectureVideoRef}
+              >
+                <source src={lectureVideoSrc} type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
+              <button
+                aria-label={
+                  lectureMuted ? "Unmute lecture video" : "Mute lecture video"
+                }
+                className="video-sound-toggle"
+                onClick={toggleLectureMute}
+                type="button"
+              >
+                <SoundToggleIcon muted={lectureMuted} />
+              </button>
+            </div>
+
+            <div className="lecture-copy">
+              <p className="overline">AI Tutor Live Lecture</p>
               <h3>{attempt.problem.title}</h3>
-              <p>
-                The avatar lecture explains the core concept first, then automatically
-                switches to a split layout with tutor on the left and sketch board on the right.
-              </p>
-
-              <div className="lesson-meta-row">
-                <span className="lesson-meta-chip">Unit: {attempt.problem.unit}</span>
-                <span className="lesson-meta-chip">Lecture first</span>
-                <span className="lesson-meta-chip">Upload-based solving</span>
-              </div>
-
-              <div className="lesson-setup-flow">
-                <div className="flow-step">
-                  <strong>1</strong>
-                  <span>Start Lecture</span>
-                </div>
-                <div className="flow-step">
-                  <strong>2</strong>
-                  <span>Watch tutor guidance</span>
-                </div>
-                <div className="flow-step">
-                  <strong>3</strong>
-                  <span>Upload your solved work</span>
-                </div>
-              </div>
-
-              <div className="lesson-actions">
+              <p>{attempt.problem.prompt}</p>
+              {renderVoiceCoachPanel()}
+              <div className="entry-cta-row">
                 <button
                   className="btn-primary"
-                  disabled={isStageTransitioning}
-                  onClick={() => transitionToStage("lecture")}
-                  type="button"
-                >
-                  Start Lecture
-                </button>
-                <button
-                  className="btn-muted"
                   disabled={isStageTransitioning}
                   onClick={() => transitionToStage("solve")}
                   type="button"
                 >
-                  Skip to Solving
+                  End Lecture and Open Sketch Board
                 </button>
               </div>
             </div>
+          </section>
+        )}
 
-            <aside className="lesson-preview-card">
-              <p className="overline">Problem Preview</p>
-              <div className="problem-statement">{attempt.problem.prompt}</div>
-              <div className="lesson-preview-note">
-                <strong>After lecture</strong>
-                <p>
-                  The avatar view shrinks to the left, and the solved-work upload board appears
-                  on the right.
-                </p>
-              </div>
-            </aside>
-          </div>
-        </section>
-      )}
-
-      {stage === "lecture" && (
-        <section className="panel-card lecture-stage lecture-stage-full stage-enter">
-          <div className="lecture-video-wrap">
-            <video
-              autoPlay
-              className="lecture-video"
-              key={lectureVideoSrc}
-              loop
-              muted={lectureMuted}
-              playsInline
-              preload="metadata"
-              ref={lectureVideoRef}
-            >
-              <source src={lectureVideoSrc} type="video/mp4" />
-              Your browser does not support the video tag.
-            </video>
-            <button
-              aria-label={lectureMuted ? "Unmute lecture video" : "Mute lecture video"}
-              className="video-sound-toggle"
-              onClick={toggleLectureMute}
-              type="button"
-            >
-              <SoundToggleIcon muted={lectureMuted} />
-            </button>
-          </div>
-
-          <div className="lecture-copy">
-            <p className="overline">AI Tutor Live Lecture</p>
-            <h3>{attempt.problem.title}</h3>
-            <p>{attempt.problem.prompt}</p>
-            {renderVoiceCoachPanel()}
-            <div className="entry-cta-row">
-              <button
-                className="btn-primary"
-                disabled={isStageTransitioning}
-                onClick={() => transitionToStage("solve")}
-                type="button"
-              >
-                End Lecture and Open Sketch Board
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {stage === "solve" && (
-        <div className="solve-lesson-grid stage-enter">
-          <section className="panel-card solve-lesson-split">
-            <div className="solve-lesson-left">
-              <div className="lecture-mini">
-                <video
-                  autoPlay
-                  className="lecture-mini-video"
-                  key={`${lectureVideoSrc}-mini`}
-                  loop
-                  muted
-                  playsInline
-                  preload="metadata"
-                >
-                  <source src={lectureVideoSrc} type="video/mp4" />
-                  Your browser does not support the video tag.
-                </video>
-              </div>
-              <div className="problem-header">
-                <p className="overline">Tutor Summary</p>
-                <h3>{attempt.problem.title}</h3>
-                <p className="muted">
-                  Left side shows tutor summary, right side is the student upload workspace.
-                </p>
-              </div>
-              <div className="problem-statement">{attempt.problem.prompt}</div>
-              <div className="action-row">
-                <button
-                  className="btn-muted"
-                  disabled={isStageTransitioning}
-                  onClick={() => transitionToStage("lecture")}
-                  type="button"
-                >
-                  Replay Lecture
-                </button>
-                <button className="btn-teal" onClick={requestHint} type="button">
-                  Ask Hint
-                </button>
-              </div>
-            </div>
-
-            <div className="solve-lesson-right">
-              <div className="canvas-label">
-                <span>Sketch Board Upload</span>
-                <label className="upload-dropzone">
-                  <input
-                    accept="image/*,.pdf"
-                    className="upload-input"
-                    onChange={(event) => onUploadWork(event.target.files?.[0] ?? null)}
-                    type="file"
-                  />
-                  <strong>{uploadedFileName ? "Uploaded" : "Upload your solved work"}</strong>
-                  <small>
-                    {uploadedFileName
-                      ? uploadedFileName
-                      : "Drag or select an image/PDF of your handwritten solution"}
-                  </small>
-                </label>
-                {uploadedPreviewUrl && (
-                  <img
-                    alt="Uploaded solution preview"
-                    className="upload-preview-image"
-                    src={uploadedPreviewUrl}
-                  />
-                )}
-              </div>
-
-              <div className="canvas-label">
-                <span>Work Notes (Optional)</span>
-                <textarea
-                  value={workText}
-                  onChange={(event) => onWorkChange(event.target.value)}
-                  placeholder="Write quick notes about your solving process…"
-                  rows={7}
-                />
-              </div>
-
-              {renderVoiceCoachPanel()}
-
-              <div className="action-row">
-                <button className="btn-muted" onClick={clearWorkNotes} type="button">
-                  Clear Notes
-                </button>
-              </div>
-
-              <div className="answer-row">
-                <span>Final Answer</span>
-                <div className="answer-input-row">
-                  <input
-                    value={answer}
-                    onChange={(event) => setAnswer(event.target.value)}
-                    placeholder="Type your final answer…"
-                  />
-                  <button className="btn-primary" onClick={submitAnswer} type="button">
-                    Submit
+        {stage === "solve" && (
+          <div className="solve-lesson-grid stage-enter">
+            <section className="panel-card solve-lesson-split">
+              <div className="solve-lesson-left">
+                <div className="lecture-mini">
+                  <video
+                    autoPlay
+                    className="lecture-mini-video"
+                    key={`${lectureVideoSrc}-mini`}
+                    loop
+                    muted
+                    playsInline
+                    preload="metadata"
+                  >
+                    <source src={lectureVideoSrc} type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
+                </div>
+                <div className="problem-header">
+                  <p className="overline">Tutor Summary</p>
+                  <h3>{attempt.problem.title}</h3>
+                  <p className="muted">
+                    Left side shows tutor summary, right side is the student
+                    upload workspace.
+                  </p>
+                </div>
+                <div className="problem-statement">
+                  {attempt.problem.prompt}
+                </div>
+                <div className="action-row">
+                  <button
+                    className="btn-muted"
+                    disabled={isStageTransitioning}
+                    onClick={() => transitionToStage("lecture")}
+                    type="button"
+                  >
+                    Replay Lecture
+                  </button>
+                  <button
+                    className="btn-teal"
+                    onClick={requestHint}
+                    type="button"
+                  >
+                    Ask Hint
                   </button>
                 </div>
               </div>
+
+              <div className="solve-lesson-right">
+                <div className="canvas-label">
+                  <span>Sketch Board Upload</span>
+                  <label className="upload-dropzone">
+                    <input
+                      accept="image/*,.pdf"
+                      className="upload-input"
+                      onChange={(event) =>
+                        onUploadWork(event.target.files?.[0] ?? null)
+                      }
+                      type="file"
+                    />
+                    <strong>
+                      {uploadedFileName
+                        ? "Uploaded"
+                        : "Upload your solved work"}
+                    </strong>
+                    <small>
+                      {uploadedFileName
+                        ? uploadedFileName
+                        : "Drag or select an image/PDF of your handwritten solution"}
+                    </small>
+                  </label>
+                  {uploadedPreviewUrl && (
+                    <img
+                      alt="Uploaded solution preview"
+                      className="upload-preview-image"
+                      src={uploadedPreviewUrl}
+                    />
+                  )}
+                </div>
+
+                <div className="canvas-label">
+                  <span>Work Notes (Optional)</span>
+                  <textarea
+                    value={workText}
+                    onChange={(event) => onWorkChange(event.target.value)}
+                    placeholder="Write quick notes about your solving process…"
+                    rows={7}
+                  />
+                </div>
+
+                {renderVoiceCoachPanel()}
+
+                <div className="action-row">
+                  <button
+                    className="btn-muted"
+                    onClick={clearWorkNotes}
+                    type="button"
+                  >
+                    Clear Notes
+                  </button>
+                </div>
+
+                <div className="answer-row">
+                  <span>Final Answer</span>
+                  <div className="answer-input-row">
+                    <input
+                      value={answer}
+                      onChange={(event) => setAnswer(event.target.value)}
+                      placeholder="Type your final answer…"
+                    />
+                    <button
+                      className="btn-primary"
+                      onClick={submitAnswer}
+                      type="button"
+                    >
+                      {gradeBusy ? "Submitting..." : "Submit"}
+                    </button>
+                  </div>
+                </div>
+
+                {gradeResult && (
+                  <section className="panel-card">
+                    <div className="workspace-head">
+                      <div>
+                        <h3>TA Grading Result</h3>
+                        <p>
+                          Verdict:{" "}
+                          {String(taResult["overall_verdict"] ?? "unknown")} ·
+                          Score:{" "}
+                          {partialScore &&
+                          typeof partialScore["percent"] === "number"
+                            ? `${partialScore["percent"]}%`
+                            : "N/A"}
+                        </p>
+                      </div>
+                      <div className="create-workspace-kpis">
+                        <span className="create-kpi-chip">
+                          answer check:{" "}
+                          {gradeResult.answer_checked_correct
+                            ? "correct"
+                            : "not yet"}
+                        </span>
+                        <span className="create-kpi-chip">
+                          RAG cites: {gradeResult.rag_citations_count}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="muted">
+                      {String(
+                        taResult["feedback_message"] ??
+                          "No feedback message returned.",
+                      )}
+                    </p>
+                    {parserWarnings.length > 0 && (
+                      <p className="muted">
+                        Parser notes: {parserWarnings.join(" | ")}
+                      </p>
+                    )}
+                  </section>
+                )}
+              </div>
+            </section>
+
+            {error && <p className="error">{error}</p>}
+
+            <section className="panel-card">
+              <CoachPanel
+                signals={signals}
+                intervention={intervention}
+                onRequestHint={requestHint}
+              />
+            </section>
+
+            <div className="action-row">
+              <button
+                className="btn-muted"
+                onClick={() => navigate(`/result/${attempt.attempt_id}`)}
+                type="button"
+              >
+                View Summary
+              </button>
             </div>
-          </section>
-
-          {error && <p className="error">{error}</p>}
-
-          <section className="panel-card">
-            <CoachPanel signals={signals} intervention={intervention} onRequestHint={requestHint} />
-          </section>
-
-          <div className="action-row">
-            <button className="btn-muted" onClick={() => navigate(`/result/${attempt.attempt_id}`)} type="button">
-              View Summary
-            </button>
           </div>
-        </div>
-      )}
+        )}
         <div
           aria-hidden="true"
           className={`stage-transition-overlay${isStageTransitioning ? " show" : ""}`}
