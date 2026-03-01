@@ -16,6 +16,8 @@ import type {
   LectureItem,
   LearningPace,
   LearningStyle,
+  OrchestratorChatResponse,
+  OrchestratorVoiceResponse,
   Problem,
   Summary,
   UserRole,
@@ -122,6 +124,27 @@ export type VoiceSessionStartPayload = {
   attempt_id?: string;
   course_id?: string;
   lecture_id?: string;
+};
+
+export type OrchestratorChatPayload = {
+  session_id: string;
+  message: string;
+  topic: string;
+  level?: "beginner" | "intermediate" | "advanced";
+  learning_style?: string;
+  pace?: string;
+  mode?: "strict" | "convenience";
+  knowledge_mode?: "internal_only" | "external_ok" | "external_only";
+};
+
+export type OrchestratorVoicePayload = {
+  session_id: string;
+  topic: string;
+  level?: "beginner" | "intermediate" | "advanced";
+  learning_style?: string;
+  pace?: string;
+  mode?: "strict" | "convenience";
+  knowledge_mode?: "internal_only" | "external_ok" | "external_only";
 };
 
 export function signup(payload: SignupPayload) {
@@ -278,6 +301,42 @@ export function postVoiceSessionTurn(sessionId: string, audioBlob: Blob) {
   formData.append("session_id", sessionId);
   formData.append("audio", audioBlob, "student-voice.webm");
   return request<VoiceSessionTurnResponse>("/api/voice/session/turn", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export function postOrchestratorChat(payload: OrchestratorChatPayload) {
+  return request<OrchestratorChatResponse>("/api/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function postOrchestratorVoice(
+  audioBlob: Blob,
+  payload: OrchestratorVoicePayload,
+) {
+  const formData = new FormData();
+  formData.append("audio", audioBlob, "student-voice.webm");
+  formData.append("session_id", payload.session_id);
+  formData.append("topic", payload.topic);
+  if (payload.level) {
+    formData.append("level", payload.level);
+  }
+  if (payload.learning_style) {
+    formData.append("learning_style", payload.learning_style);
+  }
+  if (payload.pace) {
+    formData.append("pace", payload.pace);
+  }
+  if (payload.mode) {
+    formData.append("mode", payload.mode);
+  }
+  if (payload.knowledge_mode) {
+    formData.append("knowledge_mode", payload.knowledge_mode);
+  }
+  return request<OrchestratorVoiceResponse>("/api/chat/voice", {
     method: "POST",
     body: formData,
   });

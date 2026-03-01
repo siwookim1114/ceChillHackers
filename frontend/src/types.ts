@@ -36,6 +36,26 @@ export type VoiceSessionTurnResponse = {
   audio_mime_type: string;
 };
 
+export type OrchestratorChatResponse = {
+  session_id: string;
+  agent_name: string;
+  response_text: string;
+  structured_data: Record<string, unknown>;
+  citations: Array<Record<string, unknown>>;
+  next_action: string;
+  route_used: string;
+  intent: string;
+  awaiting_feedback: boolean;
+  turn_count: number;
+  rag_found: boolean;
+  rag_citations_count: number;
+};
+
+export type OrchestratorVoiceResponse = OrchestratorChatResponse & {
+  transcript: string;
+  audio_base64: string;
+};
+
 export type AttemptGradeResponse = {
   attempt_id: string;
   solved: boolean;
